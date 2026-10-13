@@ -1,0 +1,17 @@
+.DS_Store
+
+# Godot's per-machine state, including export credentials if any are ever set
+project/.godot/
+project/export_credentials.cfg
+
+# The godot-sqlite binaries are installed per machine by tools/setup.sh
+project/addons/godot-sqlite/bin/
+
+# Editor-only addons some developers keep locally
+project/addons/script-ide/
+
+# Export output (the presets write here)
+build/
+
+# Agent notes are kept outside this public repository
+CLAUDE.md
