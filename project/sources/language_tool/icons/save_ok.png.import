@@ -3,8 +3,8 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://cs7v0nap5hadi"
-path.s3tc="res://.godot/imported/save_ok.png-00f2e75f4737ed4b80b793ebf1493136.s3tc.ctex"
-path.etc2="res://.godot/imported/save_ok.png-00f2e75f4737ed4b80b793ebf1493136.etc2.ctex"
+path.s3tc="res://.godot/imported/save_ok.png-be0c1c61003446e53de6ae8135fb40fc.s3tc.ctex"
+path.etc2="res://.godot/imported/save_ok.png-be0c1c61003446e53de6ae8135fb40fc.etc2.ctex"
 metadata={
 "imported_formats": ["s3tc_bptc", "etc2_astc"],
 "vram_texture": true
@@ -12,8 +12,8 @@ metadata={
 
 [deps]
 
-source_file="res://assets/menus/save_ok.png"
-dest_files=["res://.godot/imported/save_ok.png-00f2e75f4737ed4b80b793ebf1493136.s3tc.ctex", "res://.godot/imported/save_ok.png-00f2e75f4737ed4b80b793ebf1493136.etc2.ctex"]
+source_file="res://sources/language_tool/icons/save_ok.png"
+dest_files=["res://.godot/imported/save_ok.png-be0c1c61003446e53de6ae8135fb40fc.s3tc.ctex", "res://.godot/imported/save_ok.png-be0c1c61003446e53de6ae8135fb40fc.etc2.ctex"]
 
 [params]
 

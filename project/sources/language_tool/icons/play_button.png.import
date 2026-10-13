@@ -3,8 +3,8 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://ctike5jfpr68v"
-path.s3tc="res://.godot/imported/play_button.png-00741f6ebfe0fb1aa0a4531c109dd421.s3tc.ctex"
-path.etc2="res://.godot/imported/play_button.png-00741f6ebfe0fb1aa0a4531c109dd421.etc2.ctex"
+path.s3tc="res://.godot/imported/play_button.png-503929ae783858570001d9b3e1c00155.s3tc.ctex"
+path.etc2="res://.godot/imported/play_button.png-503929ae783858570001d9b3e1c00155.etc2.ctex"
 metadata={
 "imported_formats": ["s3tc_bptc", "etc2_astc"],
 "vram_texture": true
@@ -12,8 +12,8 @@ metadata={
 
 [deps]
 
-source_file="res://assets/menus/play_button.png"
-dest_files=["res://.godot/imported/play_button.png-00741f6ebfe0fb1aa0a4531c109dd421.s3tc.ctex", "res://.godot/imported/play_button.png-00741f6ebfe0fb1aa0a4531c109dd421.etc2.ctex"]
+source_file="res://sources/language_tool/icons/play_button.png"
+dest_files=["res://.godot/imported/play_button.png-503929ae783858570001d9b3e1c00155.s3tc.ctex", "res://.godot/imported/play_button.png-503929ae783858570001d9b3e1c00155.etc2.ctex"]
 
 [params]
 

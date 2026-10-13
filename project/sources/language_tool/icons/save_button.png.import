@@ -3,8 +3,8 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://5n02dxd66fw4"
-path.s3tc="res://.godot/imported/save_button.png-e0abff5de73db7c1ad84988080c20282.s3tc.ctex"
-path.etc2="res://.godot/imported/save_button.png-e0abff5de73db7c1ad84988080c20282.etc2.ctex"
+path.s3tc="res://.godot/imported/save_button.png-b91368c21d168d55e64a961f86330ea4.s3tc.ctex"
+path.etc2="res://.godot/imported/save_button.png-b91368c21d168d55e64a961f86330ea4.etc2.ctex"
 metadata={
 "imported_formats": ["s3tc_bptc", "etc2_astc"],
 "vram_texture": true
@@ -12,8 +12,8 @@ metadata={
 
 [deps]
 
-source_file="res://assets/menus/save_button.png"
-dest_files=["res://.godot/imported/save_button.png-e0abff5de73db7c1ad84988080c20282.s3tc.ctex", "res://.godot/imported/save_button.png-e0abff5de73db7c1ad84988080c20282.etc2.ctex"]
+source_file="res://sources/language_tool/icons/save_button.png"
+dest_files=["res://.godot/imported/save_button.png-b91368c21d168d55e64a961f86330ea4.s3tc.ctex", "res://.godot/imported/save_button.png-b91368c21d168d55e64a961f86330ea4.etc2.ctex"]
 
 [params]
 

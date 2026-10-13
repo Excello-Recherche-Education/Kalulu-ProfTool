@@ -3,8 +3,8 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://c5jiyxrmmjmdb"
-path.s3tc="res://.godot/imported/modify_button.png-2b8dde2439c7c1a06f1d07c9263d0418.s3tc.ctex"
-path.etc2="res://.godot/imported/modify_button.png-2b8dde2439c7c1a06f1d07c9263d0418.etc2.ctex"
+path.s3tc="res://.godot/imported/modify_button.png-0fb31e39b33d901d89cafacab98c8216.s3tc.ctex"
+path.etc2="res://.godot/imported/modify_button.png-0fb31e39b33d901d89cafacab98c8216.etc2.ctex"
 metadata={
 "imported_formats": ["s3tc_bptc", "etc2_astc"],
 "vram_texture": true
@@ -12,8 +12,8 @@ metadata={
 
 [deps]
 
-source_file="res://assets/menus/modify_button.png"
-dest_files=["res://.godot/imported/modify_button.png-2b8dde2439c7c1a06f1d07c9263d0418.s3tc.ctex", "res://.godot/imported/modify_button.png-2b8dde2439c7c1a06f1d07c9263d0418.etc2.ctex"]
+source_file="res://sources/language_tool/icons/modify_button.png"
+dest_files=["res://.godot/imported/modify_button.png-0fb31e39b33d901d89cafacab98c8216.s3tc.ctex", "res://.godot/imported/modify_button.png-0fb31e39b33d901d89cafacab98c8216.etc2.ctex"]
 
 [params]
 
