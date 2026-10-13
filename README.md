@@ -60,10 +60,12 @@ into `project/addons/godot-sqlite/bin` yourself.
 ## Exporting
 
 Three presets, in `project/export_presets.cfg`: `macOS ProfTool`, `Windows ProfTool`
-and `Linux ProfTool`. Always pass an absolute `--path`, and check that the artifact
-exists — Godot's exit code is 0 even when an export fails:
+and `Linux ProfTool`. Always pass an absolute `--path`, create the output folder first,
+and check that the artifact exists — Godot's exit code is 0 even when an export fails,
+including when the folder is missing:
 
 ```bash
+mkdir -p build/Linux
 godot --headless --path "$PWD/project" --export-release "Linux ProfTool" "$PWD/build/Linux/Prof_Tool-Linux.zip"
 ```
 
