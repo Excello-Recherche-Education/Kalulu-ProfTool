@@ -1,0 +1,839 @@
+@tool
+extends Node
+
+const _SYMBOLS_TO_STRING: Dictionary[String, String] = {
+	"#": "sharp",
+	"@": "at",
+	"*": "star",
+	"$": "usd",
+	"%": "pcent",
+	"§": "para"
+}
+const BASE_PATH: String = "user://language_resources/"
+const TRACING_DATA_FOLDER: String = "tracing_data/"
+const LOOK_AND_LEARN_IMAGES: String = "/look_and_learn/images/"
+const LOOK_AND_LEARN_SOUNDS: String = "/look_and_learn/sounds/"
+const LOOK_AND_LEARN_VIDEOS: String = "/look_and_learn/video/"
+const LANGUAGE_SOUNDS: String = "/language_sounds/"
+const KALULU_FOLDER: String = "/kalulu/"
+const VIDEO_EXTENSION: String = ".ogv"
+const IMAGE_EXTENSION: String = ".png"
+const SOUND_EXTENSION: String = ".mp3"
+
+var language: String:
+	set(value):
+		Log.trace("Database: set language from %s to %s" % [language, value])
+		language = value
+		db_path = get_language_folder() + "/language.db"
+		words_path = get_language_folder() + "/words/"
+var db_path: String = get_language_folder() + "/language.db":
+	set(value):
+		db_path = value
+		if db:
+			db.path = db_path
+			db.foreign_keys = true
+			connect_to_db()
+var words_path: String = get_language_folder() + "/words/"
+var is_open: bool = false
+# See _get_folder_listing.
+var _folder_listings: Dictionary[String, Dictionary] = {}
+var _folder_listings_frame: int = -1
+
+@onready var db: SQLite = SQLite.new()
+
+
+func _exit_tree() -> void:
+	close()
+
+
+## Closes the SQLite connection if one is open.
+## This MUST be called before deleting or replacing the language_resources
+## folder: on Windows the OS keeps a lock on open files, so an open language.db
+## makes the removal of its parent directory fail and leaves a half-deleted,
+## corrupted pack behind. See UserDataManager.purge_user_folders_if_needed and
+## PackageDownloader._copy_data.
+func close() -> void:
+	if not is_open:
+		return
+	Log.info("Database: Closing database connection at %s" % ProjectSettings.globalize_path(db.path))
+	db.close_db()
+	is_open = false
+
+
+func connect_to_db() -> void:
+	if is_open:
+		Log.trace("Database: Opening database while a connection is already opened. Closing the previous one.")
+		close()
+	if FileAccess.file_exists(db.path):
+		is_open = db.open_db()
+		if not is_open:
+			Log.error("Database: Database is not opened")
+			return
+		Log.info("Database: Database opened at %s" % ProjectSettings.globalize_path(db.path))
+		if db.get_error_message() != "" and db.get_error_message() != "not an error":
+			Log.warn("Database: Database just opened but already contains an error message: %s" % db.get_error_message())
+	else:
+		Log.warn("Database: Database file not found at %s" % db.path)
+
+
+func get_exercise_for_lesson(lesson_nb: int) -> Array[int]:
+	var query: String = "Select Exercise1, Exercise2, Exercise3 FROM LessonsExercises
+	INNER JOIN Lessons ON Lessons.ID = LessonsExercises.LessonID
+	WHERE LessonNB == " + str(lesson_nb)
+	db.query(query)
+	# Exercise* == 0 means "no minigame in this slot": drop zeros so size = count.
+	var result: Array[int] = []
+	for element: Dictionary in db.query_result:
+		for column: String in ["Exercise1", "Exercise2", "Exercise3"]:
+			var exercise_id: int = element[column] as int
+			if exercise_id > 0:
+				result.append(exercise_id)
+	return result
+
+
+func get_gps_for_lesson(lesson_nb: int, distinct: bool, only_new: bool = false, only_vowels: bool = false, with_other_phonemes: bool = false, include_exceptions: bool = false) -> Array[Dictionary]:
+	
+	var parameters: Array = []
+	var symbol: String = "<=" if not only_new else "=="
+	var query: String = "SELECT g.ID, g.Grapheme, g.Phoneme, "
+	
+	if with_other_phonemes:
+		query += "(SELECT group_concat(Phoneme) FROM GPs g2 
+		INNER JOIN GPsInLessons ON GPsInLessons.GPID = g2.ID 
+		INNER JOIN Lessons ON Lessons.ID = GPsInLessons.LessonID AND Lessons.LessonNb " + symbol + " ?
+		WHERE g.Grapheme = g2.Grapheme AND g.Phoneme != g2.Phoneme)
+	AS OtherPhonemes, "
+		parameters.append(lesson_nb)
+	
+	query += "Type, LessonNb FROM GPs g
+	INNER JOIN GPsInLessons ON GPsInLessons.GPID = g.ID 
+	INNER JOIN Lessons ON Lessons.ID = GPsInLessons.LessonID AND Lessons.LessonNb " + symbol + " ?"
+	parameters.append(lesson_nb)
+	
+	var conditions: Array = []
+	if not include_exceptions:
+		conditions.append("Exception = 0")
+	if only_vowels:
+		conditions.append("Type = 1")
+	
+	if conditions.size() > 0:
+		query += " WHERE " + " AND ".join(conditions)
+	
+	if distinct:
+		query += " GROUP BY Grapheme"
+	
+	query += " ORDER BY LessonNb ASC"
+	
+	db.query_with_bindings(query, parameters)
+	
+	var result: Array[Dictionary] = db.query_result
+	
+	if with_other_phonemes:
+		for gp: Dictionary in result:
+			if gp.OtherPhonemes:
+				var phonemes: String = gp.OtherPhonemes
+				gp.OtherPhonemes = phonemes.split(",")
+	
+	return result
+
+
+func get_gps_from_syllable(syllable_id: int) -> Array[Dictionary]:
+	db.query_with_bindings("SELECT GPs.ID, GPs.Grapheme, GPs.Phoneme, GPs.Type FROM Syllables INNER JOIN GPsInSyllables ON Syllables.ID = GPsInSyllables.SyllableID AND Syllables.ID=? INNER JOIN GPs WHERE GPs.ID = GPsInSyllables.GPID ORDER BY Position", [syllable_id])
+	return db.query_result
+
+
+func get_gp_from_word(id: int) -> Array:
+	db.query_with_bindings("SELECT GPs.* FROM Words INNER JOIN GPsInWords ON Words.ID = GPsInWords.WordID AND Words.ID=? INNER JOIN GPs WHERE GPs.ID = GPsInWords.GPID ORDER BY Position", [id])
+	return db.query_result
+
+
+func get_gps_from_sentence(sentence_id: int) -> Array[Dictionary]:
+	db.query_with_bindings("SELECT GPs.ID, GPs.Grapheme, GPs.Phoneme, GPs.Type, GPsInWords.WordID, GPsInWords.Position AS GPPosition, WordsInSentences.Position AS WordPosition FROM GPs
+INNER JOIN GPsInWords ON GPsInWords.GPID = GPs.ID
+INNER JOIN WordsInSentences ON WordsInSentences.WordID = GPsInWords.WordID
+INNER JOIN Sentences ON Sentences.ID = WordsInSentences.SentenceID
+WHERE Sentences.ID = ?
+ORDER BY WordPosition ASC, GPPosition ASC", [sentence_id])
+	return db.query_result
+
+
+func get_words_containing_grapheme(grapheme: String) -> Array[Dictionary]:
+	db.query_with_bindings("SELECT Word FROM Words INNER JOIN GPsInWords INNER JOIN GPs on Words.ID = GPsInWords.WordID AND GPs.Grapheme=? AND GPs.ID = GPsInWords.GPID", [grapheme])
+	return db.query_result
+
+
+func get_word_id_from_text(text: String) -> int:
+	var clean_text: String = text.replace(".", "").replace(",", "")
+	db.query_with_bindings(
+		"SELECT ID FROM Words WHERE Word = ? COLLATE NOCASE;",
+		[clean_text]
+	)
+	if db.query_result.size() > 0:
+		if db.query_result[0].has("ID"):
+			return db.query_result[0].ID
+	# If not found, trying again with even cleaner text
+	clean_text = clean_text.replace("'", "")
+	db.query_with_bindings(
+		"SELECT ID FROM Words WHERE Word = ? COLLATE NOCASE;",
+		[clean_text]
+	)
+	if db.query_result.size() > 0:
+		if db.query_result[0].has("ID"):
+			return db.query_result[0].ID
+	Log.trace("Database: Word " + clean_text + " ID not found")
+	return -1
+
+
+func get_syllables_for_lesson(lesson_nb: int, only_new: bool = false) -> Array[Dictionary]:
+	var query: String = "SELECT Syllables.ID, Syllables.Syllable as Grapheme, VerifiedCount.LessonNb FROM Syllables
+	 INNER JOIN 
+	(SELECT SyllableID, count() as Count FROM GPsInSyllables 
+		INNER JOIN GPsInLessons ON GPsInLessons.GPID = GPsInSyllables.GPID 
+		GROUP BY SyllableID 
+		) TotalCount ON TotalCount.SyllableID = Syllables.ID 
+	INNER JOIN 
+	(SELECT SyllableID, count() as Count, max(LessonNb) AS LessonNb FROM GPsInSyllables 
+		INNER JOIN GPsInLessons ON GPsInLessons.GPID = GPsInSyllables.GPID 
+		INNER JOIN Lessons ON Lessons.ID = GPsInLessons.LessonID AND Lessons.LessonNb <= ?
+		GROUP BY SyllableID 
+		) VerifiedCount ON VerifiedCount.SyllableID = Syllables.ID AND VerifiedCount.Count = TotalCount.Count"
+	if only_new:
+		query += " INNER JOIN GPsInSyllables ON GPsInSyllables.SyllableID = Syllables.ID 
+			INNER JOIN GPsInLessons ON GPsInLessons.GPID = GPsInSyllables.GPID 
+			INNER JOIN Lessons ON Lessons.ID = GPsInLessons.LessonID AND Lessons.LessonNb = ?"
+		db.query_with_bindings(query, [lesson_nb, lesson_nb])
+	else:
+		db.query_with_bindings(query, [lesson_nb])
+	
+	var res: Array[Dictionary] = db.query_result
+	for syllable: Dictionary in res:
+		syllable.GPs = get_gps_from_syllable(syllable.ID as int)
+		var phonemes: Array[String] = []
+		for gp: Dictionary in syllable.GPs:
+			phonemes.append(gp.Phoneme)
+		syllable.Phoneme = "-".join(phonemes)
+	
+	return res
+
+
+func get_words_for_lesson(lesson_nb: int, only_new: bool = false, min_length: int = 2, max_length: int = 99, include_exception: bool = false) -> Array[Dictionary]:
+	var parameters: Array = []
+	var query: String = "SELECT DISTINCT Words.ID, Words.Word, Words.Exception, VerifiedCount.Count as GPsCount, MaxLessonNb as LessonNb, VerifiedCount.gpsid as GPs_IDs
+FROM Words
+	 INNER JOIN 
+	(SELECT WordID, count() as Count FROM GPsInWords 
+		INNER JOIN GPsInLessons ON GPsInLessons.GPID = GPsInWords.GPID 
+		GROUP BY WordID 
+		) TotalCount ON TotalCount.WordID = Words.ID 
+	INNER JOIN 
+	(SELECT WordID, count() as Count, max(LessonNb) as MaxLessonNb, group_concat(GPsInWords.GPID) as gpsid FROM GPsInWords 
+		INNER JOIN GPsInLessons ON GPsInLessons.GPID = GPsInWords.GPID 
+		INNER JOIN Lessons ON Lessons.ID = GPsInLessons.LessonID AND Lessons.LessonNb <= ?
+		GROUP BY WordID 
+		) VerifiedCount ON VerifiedCount.WordID = Words.ID AND VerifiedCount.Count = TotalCount.Count"
+	parameters.append(lesson_nb)
+	
+	if only_new:
+		query += " INNER JOIN GPsInWords ON GPsInWords.WordID = Words.ID 
+			INNER JOIN GPsInLessons ON GPsInLessons.GPID = GPsInWords.GPID 
+			INNER JOIN Lessons ON Lessons.ID = GPsInLessons.LessonID AND Lessons.LessonNb = ?"
+		parameters.append(lesson_nb)
+	
+	query += " WHERE TotalCount.Count <= ? and TotalCount.Count >= ?"
+
+	if not include_exception:
+		query += " and Words.Exception = false"
+
+	query += " ORDER BY LessonNb, GPsCount ASC"
+	parameters.append(max_length)
+	parameters.append(min_length)
+	
+	db.query_with_bindings(query, parameters)
+	var res: Array[Dictionary] = db.query_result
+	
+	# Parse the GPs IDs
+	for word: Dictionary in res:
+		var word_gps: Array = []
+		var word_gps_id: String = word.GPs_IDs
+		for gp_id: String in word_gps_id.split(","):
+			word_gps.append({ID = int(gp_id)})
+		word.GPs = word_gps
+		word.erase("GPs_IDs")
+	
+	return res
+
+
+func get_words_with_silent_gp_for_lesson(lesson_nb: int, only_new: bool = false, min_length: int = 2, max_length: int = 6) -> Array[Dictionary]:
+	var parameters: Array = []
+	var query: String = "SELECT Words.ID, Words.Word, MaxLessonNb as LessonNb
+FROM Words
+	 INNER JOIN 
+	(SELECT WordID, count() as Count FROM GPsInWords 
+		INNER JOIN GPsInLessons ON GPsInLessons.GPID = GPsInWords.GPID 
+		GROUP BY WordID 
+		) TotalCount ON TotalCount.WordID = Words.ID 
+	INNER JOIN 
+	(SELECT WordID, count() as Count, max(LessonNb) as MaxLessonNb, group_concat(GPs.Phoneme) as gpphoneme FROM GPsInWords 
+		INNER JOIN GPsInLessons ON GPsInLessons.GPID = GPsInWords.GPID 
+		INNER JOIN Lessons ON Lessons.ID = GPsInLessons.LessonID AND Lessons.LessonNb <= ?
+		INNER JOIN GPs ON GPs.ID = GPsInWords.GPID
+		GROUP BY WordID 
+		) VerifiedCount ON VerifiedCount.WordID = Words.ID AND VerifiedCount.Count = TotalCount.Count"
+	parameters.append(lesson_nb)
+	
+	if only_new:
+		query += " INNER JOIN GPsInWords ON GPsInWords.WordID = Words.ID 
+			INNER JOIN GPsInLessons ON GPsInLessons.GPID = GPsInWords.GPID 
+			INNER JOIN Lessons ON Lessons.ID = GPsInLessons.LessonID AND Lessons.LessonNb = ?"
+		parameters.append(lesson_nb)
+	
+	query += " WHERE TotalCount.Count <= ? and TotalCount.Count >= ?
+	AND VerifiedCount.gpphoneme LIKE '%#%' 
+	ORDER BY LessonNb, VerifiedCount.Count ASC"
+	parameters.append(max_length)
+	parameters.append(min_length)
+	
+	db.query_with_bindings(query, parameters)
+	return db.query_result
+
+
+func get_sentences_by_lessons() -> Dictionary:
+	var sentences_by_lesson: Dictionary = {}
+	
+	db.query("SELECT * FROM Sentences")
+	var sentences: Array[Dictionary] = db.query_result
+	
+	for sentence: Dictionary in sentences:
+		var lesson_nb: int = get_min_lesson_for_sentence_id(sentence.ID as int)
+		var arr: Array = sentences_by_lesson.get(lesson_nb, [])
+		arr.append(sentence)
+		sentences_by_lesson[lesson_nb] = arr
+	return sentences_by_lesson
+
+
+func get_sentences(p_lesson_nb: int, only_new: bool = false, sentences_by_lesson: Dictionary = {}) -> Array:
+	if sentences_by_lesson.is_empty():
+		sentences_by_lesson = get_sentences_by_lessons()
+	
+	if only_new:
+		return sentences_by_lesson.get(p_lesson_nb, [])
+	
+	var ret: Array = []
+	for index: int in range(p_lesson_nb):
+		ret.append_array(sentences_by_lesson.get(index, []) as Array)
+	return ret
+
+
+func get_sentences_for_lesson(lesson_nb: int, min_length: int = 2, max_length:int = 5) -> Array[Dictionary]:
+	var query: String = "SELECT Sentences.*, VerifiedCount.MaxLessonNb AS LessonNb FROM Sentences
+INNER JOIN 
+	(SELECT SentenceID, count() as WordsCount FROM WordsInSentences 
+	GROUP BY SentenceID 
+	) WordCount ON WordCount.SentenceID = Sentences.ID
+INNER JOIN 
+	(SELECT SentenceID, count() as Count FROM GPsInWords 
+		INNER JOIN WordsInSentences ON GPsInWords.WordID = WordsInSentences.WordID
+		INNER JOIN Sentences ON WordsInSentences.SentenceID = Sentences.ID
+		INNER JOIN GPsInLessons ON GPsInLessons.GPID = GPsInWords.GPID 
+	GROUP BY SentenceID 
+	) TotalCount ON TotalCount.SentenceID = Sentences.ID 
+INNER JOIN 
+	(SELECT SentenceID, count() as Count, max(LessonNb) as MaxLessonNb FROM GPsInWords 
+		INNER JOIN GPsInLessons ON GPsInLessons.GPID = GPsInWords.GPID 
+		INNER JOIN WordsInSentences ON GPsInWords.WordID = WordsInSentences.WordID
+		INNER JOIN Sentences ON WordsInSentences.SentenceID = Sentences.ID
+		INNER JOIN Lessons ON Lessons.ID = GPsInLessons.LessonID AND Lessons.LessonNb <= ?
+		INNER JOIN GPs ON GPs.ID = GPsInWords.GPID
+	GROUP BY SentenceID 
+	) VerifiedCount ON VerifiedCount.SentenceID = Sentences.ID AND VerifiedCount.Count = TotalCount.Count
+WHERE Sentences.Exception = 0
+	AND WordsCount >=? 
+	AND WordsCount <=?
+	ORDER BY LessonNb"
+
+	db.query_with_bindings(query, [lesson_nb, min_length, max_length])
+	return db.query_result
+
+
+func get_sentences_for_lesson_with_silent_gps(lesson_nb: int, min_length: int = 2, max_length:int = 5) -> Array[Dictionary]:
+	var query: String = "SELECT Sentences.*, VerifiedCount.MaxLessonNb AS LessonNb FROM Sentences
+INNER JOIN 
+	(SELECT SentenceID, count() as WordsCount FROM WordsInSentences 
+	GROUP BY SentenceID 
+	) WordCount ON WordCount.SentenceID = Sentences.ID
+INNER JOIN 
+	(SELECT SentenceID, count() as Count FROM GPsInWords 
+		INNER JOIN WordsInSentences ON GPsInWords.WordID = WordsInSentences.WordID
+		INNER JOIN Sentences ON WordsInSentences.SentenceID = Sentences.ID
+		INNER JOIN GPsInLessons ON GPsInLessons.GPID = GPsInWords.GPID 
+	GROUP BY SentenceID 
+	) TotalCount ON TotalCount.SentenceID = Sentences.ID 
+INNER JOIN 
+	(SELECT SentenceID, count() as Count, max(LessonNb) as MaxLessonNb, group_concat(GPs.Phoneme) as SentencePhoneme FROM GPsInWords 
+		INNER JOIN GPsInLessons ON GPsInLessons.GPID = GPsInWords.GPID 
+		INNER JOIN WordsInSentences ON GPsInWords.WordID = WordsInSentences.WordID
+		INNER JOIN Sentences ON WordsInSentences.SentenceID = Sentences.ID
+		INNER JOIN Lessons ON Lessons.ID = GPsInLessons.LessonID AND Lessons.LessonNb <= ?
+		INNER JOIN GPs ON GPs.ID = GPsInWords.GPID
+	GROUP BY SentenceID 
+	) VerifiedCount ON VerifiedCount.SentenceID = Sentences.ID AND VerifiedCount.Count = TotalCount.Count
+WHERE Sentences.Exception = 0
+	AND WordsCount >=? 
+	AND WordsCount <=? 
+	AND VerifiedCount.SentencePhoneme LIKE '%#%'"
+
+	db.query_with_bindings(query, [lesson_nb, min_length, max_length])
+	return db.query_result
+
+
+func get_pseudowords_for_lesson(p_lesson_nb: int) -> Array[Dictionary]:
+	var query: String = "SELECT * FROM Pseudowords
+	 INNER JOIN Words ON Words.ID = Pseudowords.WordID 
+	 INNER JOIN 
+	(SELECT WordID, count() as Count FROM GPsInWords 
+		INNER JOIN GPsInLessons ON GPsInLessons.GPID = GPsInWords.GPID 
+		GROUP BY WordID 
+		) TotalCount ON TotalCount.WordID = Words.ID 
+	INNER JOIN 
+	(SELECT WordID, count() as Count FROM GPsInWords 
+		INNER JOIN GPsInLessons ON GPsInLessons.GPID = GPsInWords.GPID 
+		INNER JOIN Lessons ON Lessons.ID = GPsInLessons.LessonID AND Lessons.LessonNb <= ? 
+		GROUP BY WordID 
+		) VerifiedCount ON VerifiedCount.WordID = Words.ID AND VerifiedCount.Count = TotalCount.Count"
+	db.query_with_bindings(query, [p_lesson_nb])
+	return db.query_result
+
+
+func get_distractors_for_grapheme(id: int, lesson_nb: int) -> Array[Dictionary]:
+	db.query_with_bindings("SELECT DISTINCT distractor.Grapheme, distractor.ID, distractor.Phoneme From GPs stimuli 
+	INNER JOIN GPs distractor 
+	INNER JOIN Lessons 
+	INNER JOIN GPsInLessons
+	ON stimuli.ID=? AND distractor.type = stimuli.type 
+	AND distractor.exception = false
+	AND distractor.Grapheme != stimuli.Grapheme 
+	AND distractor.Phoneme != stimuli.Phoneme
+	AND CASE WHEN length(distractor.Grapheme) < length(stimuli.Grapheme) 
+		THEN stimuli.Grapheme NOT LIKE distractor.Grapheme || '%'
+		ELSE true
+	END
+	AND GPsInLessons.GPID = distractor.ID
+	AND Lessons.ID = GPsInLessons.LessonID AND Lessons.LessonNb <= ?", [id, lesson_nb])
+	return db.query_result
+
+
+func get_min_lesson_for_gp_id(gp_id: int) -> int:
+	db.query_with_bindings("SELECT Lessons.LessonNb as i FROM Lessons
+	INNER JOIN GPsInLessons ON Lessons.ID = GPsInLessons.LessonID AND GPsInLessons.GPID = ?", [gp_id])
+	if db.query_result.is_empty():
+		return -1
+	return db.query_result[0].i
+
+
+func get_min_lesson_for_word_id(word_id: int) -> int:
+	db.query_with_bindings("SELECT * FROM Words 
+	INNER JOIN GPsInWords ON GPsInWords.WordID=Words.ID
+	WHERE Words.ID=? 
+	ORDER BY Position", [word_id])
+	var minimum: int = -1
+	for result: Dictionary in db.query_result:
+		var index: int = Database.get_min_lesson_for_gp_id(result.GPID as int)
+		if index < 0:
+			minimum = -1
+			break
+		minimum = maxi(minimum, index)
+	return minimum
+
+
+func get_min_lesson_for_sentence_id(sentence_id: int) -> int:
+	db.query_with_bindings("SELECT MAX(Lessons.LessonNb) as i FROM Lessons
+	INNER JOIN GPsInLessons ON Lessons.ID = GPsInLessons.LessonID
+	INNER JOIN WordsInSentences ON WordsInSentences.SentenceID = ?
+	INNER JOIN GPsInWords ON GPsInWords.GPID = GPsInLessons.GPID AND GPsInWords.WordID = WordsInSentences.WordID", [sentence_id])
+	if not db.query_result[0].i:
+		return -1
+	return db.query_result[0].i
+
+
+func get_words_in_sentence(sentence_id: int) -> Array[Dictionary]:
+	db.query_with_bindings("SELECT * FROM WordsInSentences
+	INNER JOIN Words ON Words.ID = WordsInSentences.WordID
+	WHERE SentenceID = ?
+	ORDER BY WordsInSentences.Position", [sentence_id])
+	return db.query_result
+
+
+func get_lessons_count() -> int:
+	if not is_open:
+		# Querying a closed handle only yields an SQLite error and an empty
+		# result. Callers must read 0 as "the lesson count is unknown", never as
+		# "this language has no lessons".
+		Log.warn("Database: Trying to get lessons count when database is not opened.")
+		return 0
+	db.query("SELECT MAX(Lessons.LessonNb) as i FROM Lessons")
+	if db.query_result.is_empty() or not db.query_result[0].i:
+		return 0
+	return db.query_result[0].i
+
+
+func get_audio_stream_for_path(path: String) -> AudioStream:
+	var full_path: String = BASE_PATH.path_join(language).path_join(path)
+	if not FileAccess.file_exists(full_path):
+		return null
+	return load(full_path)
+
+
+func get_audio_stream_for_word(id: int) -> AudioStream:
+	var gps: Array = get_gp_from_word(id)
+	var file_name: String = _text_to_file_name(gps[0].Phoneme as String)
+	for index: int in range(1, gps.size()):
+		var gp: Dictionary = gps[index]
+		file_name += "-" + _text_to_file_name(gp.Phoneme as String)
+	file_name += ".mp3"
+	return load(words_path + file_name)
+
+
+func get_audio_stream_for_phoneme(phoneme: String) -> AudioStream:
+	var phoneme_array: PackedStringArray = phoneme.split("-")
+	var path: String = words_path + _text_to_file_name(phoneme_array[0])
+	for index: int in range(1, phoneme_array.size()):
+		path += "-" + _text_to_file_name(phoneme_array[index])
+	path += ".mp3"
+	
+	if FileAccess.file_exists(path) and ResourceLoader.exists(path):
+		return load(path)
+	Log.trace("Database: Audio stream not found for phoneme %s" % phoneme)
+	return null
+
+
+## Resolves a GP's asset, accepting a pack that predates the file name encoding.
+##
+## The encoded name (see [method get_gp_file_name]) is the canonical one and is
+## what anything *writing* an asset uses. Reading also accepts the older name,
+## which is the pair itself, because the app and the packs travel separately: a
+## device fetches a pack when its last_modified on S3 moves, not when the app is
+## updated, so an update would otherwise silence every uppercase or symbol GP of
+## the pack already on the device until it next reaches the network.
+##
+## For a pack that old this resolves both halves of a case-colliding pair to the
+## one file it holds, which is what that pack could ever do anyway.
+## Returns an empty String when neither name is on disk.
+func resolve_gp_asset_path(gp: Dictionary, folder: String, extension: String) -> String:
+	var path: String = resolve_external_file_path(
+			get_language_folder() + folder + get_gp_file_name(gp) + extension)
+	if not path.is_empty():
+		return path
+	return resolve_external_file_path(
+			get_language_folder() + folder + get_gp_name(gp) + extension)
+
+
+func get_gp_look_and_learn_image(gp: Dictionary) -> Texture:
+	# Through the ladder, because the name comes from the GP's own grapheme: the
+	# database holds "ç" composed and the packs ship the file decomposed, which only
+	# macOS looks up interchangeably. See resolve_external_file_path.
+	var path: String = resolve_gp_asset_path(gp, LOOK_AND_LEARN_IMAGES, IMAGE_EXTENSION)
+	if path.is_empty():
+		Log.trace("Database: Look & Learn image not found for GP %s" % str(gp))
+		return null
+	if ResourceLoader.exists(path):
+		return load(path)
+	var image: Image = Image.load_from_file(path)
+	return ImageTexture.create_from_image(image)
+
+
+func get_gp_look_and_learn_sound(gp: Dictionary) -> AudioStream:
+	# Through the ladder, for the reason in get_gp_look_and_learn_image.
+	var path: String = resolve_gp_asset_path(gp, LOOK_AND_LEARN_SOUNDS, SOUND_EXTENSION)
+	if path.is_empty():
+		Log.trace("Database: Look & Learn sound not found for GP %s" % str(gp))
+		return null
+	if ResourceLoader.exists(path):
+		return load(path)
+	var file: FileAccess = FileAccess.open(path, FileAccess.READ)
+	var error: Error = FileAccess.get_open_error()
+	if error != OK:
+		Log.error("Database: Get GP look and learn sound: Cannot open file %s. Error: %s" % [path, error_string(error)])
+		return null
+	if file == null:
+		Log.error("Database: Get GP look and learn sound: Cannot open file %s. File is null" % path)
+		return null
+	var sound: AudioStreamMP3 = AudioStreamMP3.new()
+	sound.data = file.get_buffer(file.get_length())
+	return sound
+
+
+func get_gp_look_and_learn_video(gp: Dictionary) -> VideoStream:
+	# Through the ladder, for the reason in get_gp_look_and_learn_image.
+	var path: String = resolve_gp_asset_path(gp, LOOK_AND_LEARN_VIDEOS, VIDEO_EXTENSION)
+	if path.is_empty():
+		Log.trace("Database: Look & Learn video not found for GP %s" % gp)
+		return null
+	return load(path) as VideoStream
+
+
+## Human-readable name of a grapheme-phoneme pair, "e-E". For display only --
+## it is not a file name, see [method get_gp_file_name].
+func get_gp_name(gp: Dictionary) -> String:
+	var result: String = ""
+	if gp.has("Grapheme"):
+		result += gp["Grapheme"]
+	if gp.has("Phoneme"):
+		if result != "":
+			result += "-"
+		result += gp["Phoneme"]
+	return result
+
+
+## File name, without extension, for a grapheme-phoneme pair's assets.
+##
+## Not the same thing as [method get_gp_name]: every pack has pairs that differ
+## only by case -- "e-E" against "e-e" in French, "r-R" against "r-r" in Spanish --
+## and those are different sounds. macOS and Windows hold file names case
+## insensitively, so naming the two files after the pairs themselves lets one
+## overwrite the other the moment a pack is built, zipped or unzipped there. Each
+## half goes through [method _text_to_file_name], which spells an uppercase letter
+## out, so the two names stay distinct on every platform.
+func get_gp_file_name(gp: Dictionary) -> String:
+	var result: String = ""
+	if gp.has("Grapheme"):
+		result += _text_to_file_name(gp["Grapheme"] as String)
+	if gp.has("Phoneme"):
+		if result != "":
+			result += "-"
+		result += _text_to_file_name(gp["Phoneme"] as String)
+	return result
+
+
+func get_language_folder() -> String:
+	return BASE_PATH + language
+
+
+func get_language_sound_folder() -> String:
+	return get_language_folder() + LANGUAGE_SOUNDS
+
+
+func get_gp_look_and_learn_image_path(gp: Dictionary) -> String:
+	return get_language_folder() + LOOK_AND_LEARN_IMAGES + get_gp_file_name(gp) + IMAGE_EXTENSION
+
+
+func get_gp_look_and_learn_sound_path(gp: Dictionary) -> String:
+	return get_language_folder() + LOOK_AND_LEARN_SOUNDS + get_gp_file_name(gp) + SOUND_EXTENSION
+
+
+func get_gp_look_and_learn_video_path(gp: Dictionary) -> String:
+	return get_language_folder() + LOOK_AND_LEARN_VIDEOS + get_gp_file_name(gp) + VIDEO_EXTENSION
+
+
+func get_gp_sound_path(gp: Dictionary) -> String:
+	return get_language_sound_folder() + Database.get_gp_file_name(gp) + SOUND_EXTENSION
+
+
+func get_syllable_sound_path(syllable: Dictionary) -> String:
+	return get_language_sound_folder() + _text_to_file_name(syllable.Grapheme as String) + SOUND_EXTENSION
+
+
+func get_word_sound_path(word: Dictionary) -> String:
+	return get_language_sound_folder() + _text_to_file_name(word.Word as String) + SOUND_EXTENSION
+
+
+## Finds a word or syllable sound, trying the encoded name and then the raw one.
+##
+## The same ladder as [method resolve_gp_asset_path], for the same reason: a device
+## fetches a pack when its last_modified on S3 moves, not when the app is updated. So
+## an app carrying the encoding reaches a device before the re-encoded pack does, and
+## without this every word the encoding renames is silent in between -- which for the
+## packs as they stand is "Colombia" in two of them, and whatever is added later.
+##
+## The two getters above stay as they are: they name the file a recording is *written*
+## to, which must always be the canonical one, and the Prof Tool uses them for exactly
+## that. Only reading walks the ladder.
+##
+## The second rung is skipped when the names are the same, which they are for every
+## all-lowercase word -- nearly all of them, and this runs once per word when a
+## minigame builds its pool.
+## Returns an empty String when neither name is on disk.
+func resolve_sound_path(canonical_name: String, legacy_name: String) -> String:
+	var path: String = resolve_external_file_path(
+			get_language_sound_folder() + canonical_name + SOUND_EXTENSION)
+	if not path.is_empty() or canonical_name == legacy_name:
+		return path
+	return resolve_external_file_path(
+			get_language_sound_folder() + legacy_name + SOUND_EXTENSION)
+
+
+func resolve_word_sound_path(word: Dictionary) -> String:
+	return resolve_sound_path(_text_to_file_name(word.Word as String), word.Word as String)
+
+
+func resolve_syllable_sound_path(syllable: Dictionary) -> String:
+	return resolve_sound_path(
+			_text_to_file_name(syllable.Grapheme as String), syllable.Grapheme as String)
+
+
+## Every file on disk holding one pack asset, for the Prof Tool, which previews,
+## replaces and deletes what a pack already contains rather than only playing it.
+##
+## The same two rungs as the resolvers above -- the canonical name, then the name the
+## pack used before the encoding -- but it returns every rung that is there, because
+## clearing or replacing an asset has to remove both: deleting only the canonical file
+## would bring the legacy one straight back on the next read.
+##
+## And unlike the resolvers it refuses a file whose name only matches with case
+## folded. macOS and Windows find "e-E.png" when the folder holds "e-e.png", which is
+## another pair's asset: the game accepts that for a pack too old to tell the two
+## apart, but an editor would show the wrong picture, and deleting it would destroy
+## the other pair's file. That runs both ways -- "e-e.png" is found when only
+## "e-E.png" is there -- so every candidate is checked, lowercase names included.
+## Returns the canonical file first, and nothing when neither name is on disk.
+func find_asset_files(folder: String, canonical_name: String, legacy_name: String, extension: String) -> PackedStringArray:
+	var files: PackedStringArray = []
+	for file_name: String in [canonical_name, legacy_name]:
+		var path: String = resolve_external_file_path(folder + file_name + extension)
+		if path.is_empty() or files.has(path):
+			continue
+		if not _is_named_exactly(path):
+			continue
+		files.append(path)
+	return files
+
+
+func find_gp_asset_files(gp: Dictionary, folder: String, extension: String) -> PackedStringArray:
+	return find_asset_files(
+			get_language_folder() + folder, get_gp_file_name(gp), get_gp_name(gp), extension)
+
+
+func find_word_sound_files(word: Dictionary) -> PackedStringArray:
+	return find_asset_files(get_language_sound_folder(),
+			_text_to_file_name(word.Word as String), word.Word as String, SOUND_EXTENSION)
+
+
+func find_syllable_sound_files(syllable: Dictionary) -> PackedStringArray:
+	return find_asset_files(get_language_sound_folder(),
+			_text_to_file_name(syllable.Grapheme as String), syllable.Grapheme as String,
+			SOUND_EXTENSION)
+
+
+## Drops the folder listings find_asset_files keeps for the current frame. Only
+## needed by something that writes into a pack folder and reads it back through
+## find_asset_files within the same frame -- the tests do.
+func forget_folder_listings() -> void:
+	_folder_listings.clear()
+
+
+# Whether the folder holds this file under exactly this name, case included. Unicode
+# normalization is still folded, since resolve_external_file_path already chose the
+# form and the packs mix both.
+func _is_named_exactly(path: String) -> bool:
+	return _get_folder_listing(path.get_base_dir()).has(
+			UnicodeNormalizer.to_nfd_extended(path.get_file()))
+
+
+# The names in a folder, normalized, as a set. Kept for one frame: the In-Game
+# Sounds screen checks every word, syllable and GP of a pack as it opens -- about
+# 3400 lines against a folder of as many files for fr_FR -- and listing the folder
+# for each would cost millions of normalizations. A frame is short enough that a
+# file uploaded or cleared from the screen is never answered from a stale listing.
+func _get_folder_listing(folder: String) -> Dictionary:
+	var frame: int = Engine.get_process_frames()
+	if frame != _folder_listings_frame:
+		_folder_listings.clear()
+		_folder_listings_frame = frame
+	if not _folder_listings.has(folder):
+		var names: Dictionary[String, bool] = {}
+		for entry: String in DirAccess.get_files_at(folder):
+			names[UnicodeNormalizer.to_nfd_extended(entry)] = true
+		_folder_listings[folder] = names
+	return _folder_listings[folder]
+
+
+func get_kalulu_speech_path(speech_category: String, speech_name: String) -> String:
+	return get_language_sound_folder() + KALULU_FOLDER + speech_category + "_" + speech_name + SOUND_EXTENSION
+
+
+## Resolves an external asset path against the filesystem, retrying the Unicode
+## normalization forms a language pack may have been authored in: the databases store
+## composed text (NFC, "é" as one code point) while the pack files are often named in
+## decomposed form (NFD, "e" + combining acute). macOS looks those up interchangeably,
+## every other platform does not.
+## Returns the path that actually exists, or an empty String when none of them does.
+func resolve_external_file_path(path: String) -> String:
+	var safe_path: String = SafeFilePath.from(path)
+	if FileAccess.file_exists(safe_path):
+		return safe_path
+
+	var nfd_path: String = UnicodeNormalizer.to_nfd_basic(safe_path)
+	Log.trace("Database: Resolve External File Path: File not found, retrying with Unicode NFD: %s" % nfd_path)
+	if FileAccess.file_exists(nfd_path):
+		return nfd_path
+
+	var nfd_extended_path: String = UnicodeNormalizer.to_nfd_extended(safe_path)
+	Log.trace("Database: Resolve External File Path: File not found, retrying with Unicode NFD extended: %s" % nfd_extended_path)
+	if FileAccess.file_exists(nfd_extended_path):
+		return nfd_extended_path
+
+	return ""
+
+
+## Existence counterpart of [method resolve_external_file_path]. Use this instead of
+## [method FileAccess.file_exists] for anything under a language pack, otherwise every
+## accented entry reads as missing off macOS.
+func external_file_exists(path: String) -> bool:
+	return not resolve_external_file_path(path).is_empty()
+
+
+func load_external_sound(path: String) -> AudioStreamMP3:
+	Log.trace("Database: Load External Sound: %s" % path)
+
+	var resolved_path: String = resolve_external_file_path(path)
+	if resolved_path.is_empty():
+		Log.error("Database: Load External Sound: File not found after normalization attempts: %s" % path)
+		return null
+	path = resolved_path
+
+	var file: FileAccess = FileAccess.open(path, FileAccess.READ)
+	var error: Error = FileAccess.get_open_error()
+	if error != OK or file == null:
+		Log.error("Database: Load External Sound: Cannot open file %s. Error: %s" % [path, error_string(error)])
+		return null
+	
+	var file_length: int = file.get_length()
+	if file_length <= 0:
+		Log.error("Database: Load External Sound: Invalid file length for %s" % path)
+		file.close()
+		return null
+	
+	var data: PackedByteArray = file.get_buffer(file_length)
+	file.close()
+	
+	if data.is_empty():
+		Log.error("Database: Load External Sound: Empty buffer read for %s" % path)
+		return null
+	
+	var audio_stream: AudioStreamMP3 = AudioStreamMP3.new()
+	audio_stream.data = data
+	
+	if not audio_stream or audio_stream == null:
+		Log.error("Database: Load External Sound: Failed to create AudioStreamMP3 for %s" % path)
+		return null
+	
+	Log.trace("Database: Load External Sound: Loaded %s successfully (%d bytes)" % [path, file_length])
+	return audio_stream
+
+
+## Encodes one piece of database text -- a grapheme, a phoneme, a word, a
+## syllable -- into a file name that survives a case insensitive filesystem.
+##
+## A symbol becomes a word, so "%" cannot be mangled on the way to disk. Text
+## that is already all lowercase is left alone, which is almost everything.
+## Anything carrying an uppercase letter is lowered and prefixed with "cap.",
+## so "E" and "e" no longer name the same file on macOS and Windows.
+##
+## Every name a pack holds must round-trip through this and stay unique when
+## case is folded; test_database_file_names.gd checks that for the shipped packs.
+func _text_to_file_name(text: String) -> String:
+	if _SYMBOLS_TO_STRING.has(text):
+		return _SYMBOLS_TO_STRING[text]
+	elif text == text.to_lower():
+		return text
+	else:
+		return "cap." + text.to_lower()

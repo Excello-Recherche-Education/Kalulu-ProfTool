@@ -1,0 +1,48 @@
+# Files the Prof Tool shares with the Kalulu game.
+#
+# tools/sync-shared.sh copies each one from kalulu-frontend/ into project/ at the
+# same path, together with its .uid and .import sidecars when they exist. Keeping
+# the paths identical is what lets the Prof Tool's scenes and the shared code
+# refer to each other exactly as they do in the game.
+#
+# Never edit these files under project/: change them in Kalulu-Frontend, bump the
+# kalulu-frontend submodule, and run tools/sync-shared.sh.
+#
+# Everything here must depend on nothing outside this list.
+
+# The pack-format code: reading, unpacking and naming the files of a language pack.
+sources/utils/autoloads/database.gd
+sources/utils/autoloads/log.gd
+sources/utils/autoloads/unicode_normalizer.gd
+sources/utils/minigame_types.gd
+sources/utils/safe_file_path.gd
+sources/utils/math/bezier.gd
+folder_zipper.gd
+folder_unzipper.gd
+
+# The empty pack a new language starts from.
+model_database.db
+
+# SQLite. Its binaries (addons/godot-sqlite/bin) are not in either repository;
+# tools/setup.sh installs them.
+addons/godot-sqlite/LICENSE.md
+addons/godot-sqlite/gdsqlite.gdextension
+addons/godot-sqlite/godot-sqlite.gd
+addons/godot-sqlite/plugin.cfg
+
+# The Kalulu look: the project theme, everything it references, and the audio
+# bus layout (the Prof Tool plays recordings on the Voice bus).
+resources/themes/kalulu_theme.tres
+danger_button_stylebox.tres
+resources/audio_buses/main_audio_bus_layout.tres
+assets/fonts/kalulu_mulish_regular.otf
+assets/menus/checkbox_transparent_background_checked.png
+assets/menus/checkbox_transparent_background_unchecked.png
+assets/menus/checkbox_white_background_checked.png
+assets/menus/checkbox_white_background_unchecked.png
+assets/theme/next.svg
+assets/theme/previous.svg
+assets/theme/refresh.svg
+assets/theme/up.svg
+assets/theme/visibility.svg
+assets/theme/play.svg

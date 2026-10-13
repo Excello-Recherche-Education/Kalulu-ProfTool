@@ -1,0 +1,4 @@
+[submodule "kalulu-frontend"]
+	path = kalulu-frontend
+	url = git@github.com:Excello-Recherche-Education/Kalulu-Frontend.git
+	branch = 3.1.7
