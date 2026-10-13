@@ -17,7 +17,6 @@ sources/utils/autoloads/unicode_normalizer.gd
 sources/utils/minigame_types.gd
 sources/utils/safe_file_path.gd
 sources/utils/math/bezier.gd
-folder_zipper.gd
 folder_unzipper.gd
 
 # The empty pack a new language starts from.
