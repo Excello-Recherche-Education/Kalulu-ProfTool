@@ -29,7 +29,7 @@ var total_integrity_warnings: int = 0
 
 func _ready() -> void:
 	_silence_game_music()
-	WordImporter.load_word_list()
+	WordImporter.ensure_loaded()
 	_update_add_word_list_button()
 	save_file = ProfToolSave.load_or_create()
 	_display_available_languages()

@@ -15,14 +15,27 @@ const WORD_LIST_FILE_NAME: String = "word_list.csv"
 
 ## ORTHO -> the whole CSV row, keyed by column name.
 static var word_list: Dictionary = {}
+## Whether word_list reflects the file on disk -- including there being none.
+## The menu comes back after every editor screen; without this it re-read the
+## whole lexicon each time.
+static var _loaded: bool = false
 
 
 static func word_list_path() -> String:
 	return Database.BASE_PATH.path_join(WORD_LIST_FILE_NAME)
 
 
-## Reads the word list into `word_list`. Returns an error message for the user,
-## or an empty string when the file loaded or there is no file.
+## Reads the word list once per session; later calls keep what is in memory.
+## Returns what load_word_list() returns, or an empty string when already loaded.
+static func ensure_loaded() -> String:
+	if _loaded:
+		return ""
+	return load_word_list()
+
+
+## Reads the word list into `word_list`, from disk, every time. Returns an error
+## message for the user, or an empty string when the file loaded or there is no
+## file -- which is normal: the list is optional, added with "Add Word List".
 static func load_word_list() -> String:
 	word_list.clear()
 	var path: String = word_list_path()
@@ -43,6 +56,10 @@ static func load_word_list() -> String:
 		var ortho_index: int = title_line.find("ORTHO")
 		while not file.eof_reached():
 			var line: PackedStringArray = file.get_csv_line()
+			# A file ending in a newline reads one last empty line. It used to be
+			# reported as a formatting error, after every row had loaded.
+			if line.size() == 1 and line[0].strip_edges().is_empty():
+				continue
 			if line.size() != title_line.size():
 				return "Formatting error on: %s" % line
 			var data: Dictionary = {}
@@ -52,7 +69,8 @@ static func load_word_list() -> String:
 		file.close()
 		Log.info("WordImporter: Loaded additional word list from %s (%d entries)" % [path, word_list.size()])
 	else:
-		Log.warn("WordImporter: Additional word list file not found: %s" % path)
+		Log.debug("WordImporter: No additional word list at %s" % path)
+	_loaded = true
 	return ""
 
 
