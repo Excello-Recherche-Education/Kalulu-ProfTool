@@ -7,7 +7,6 @@ enum FileCheckResult {
 }
 
 const BASE_PATH: String = "user://language_resources/"
-const SAVE_FILE_PATH: String = "user://prof_tool_save.tres"
 const MODEL_DATABASE_PATH: String = "res://model_database.db"
 
 var save_file: ProfToolSave
@@ -32,9 +31,11 @@ func _ready() -> void:
 	_silence_game_music()
 	WordImporter.load_word_list()
 	_update_add_word_list_button()
-	save_file = _load_save_file()
+	save_file = ProfToolSave.load_or_create()
 	_display_available_languages()
-	tab_container.current_tab = save_file.main_menu_selected_tab
+	# Clamped: the tab is read from a file, and a tab that no longer exists would
+	# make the container error rather than open on the first one.
+	tab_container.current_tab = clampi(save_file.main_menu_selected_tab, 0, tab_container.get_tab_count() - 1)
 	tab_container.tab_changed.connect(_on_tab_container_tab_changed)
 
 
@@ -46,23 +47,6 @@ func _silence_game_music() -> void:
 	var music_manager: Node = get_node_or_null(^"/root/MusicManager")
 	if music_manager:
 		music_manager.call(&"stop")
-
-
-## The session file, or a fresh one when there is none or it no longer loads.
-##
-## A save written before prof_tool_save.gd moved under sources/language_tool/
-## names the script by its old path only, so it cannot load any more. Starting
-## fresh costs the user one language selection. The cache is bypassed so a failed
-## load is never handed back again on the next return to this menu.
-func _load_save_file() -> ProfToolSave:
-	if ResourceLoader.exists(SAVE_FILE_PATH):
-		var existing: ProfToolSave = ResourceLoader.load(SAVE_FILE_PATH, "", ResourceLoader.CACHE_MODE_IGNORE) as ProfToolSave
-		if existing:
-			return existing
-		Log.warn("ProfToolMenu: %s could not be loaded, starting a new one" % SAVE_FILE_PATH)
-	var fresh: ProfToolSave = ProfToolSave.new()
-	ResourceSaver.save(fresh, SAVE_FILE_PATH)
-	return fresh
 
 
 func _display_available_languages() -> void:
@@ -498,7 +482,7 @@ func _on_language_select_button_item_selected(index: int) -> void:
 		new_language_container.hide()
 	
 	save_file.selected_language = language_select_button.get_item_text(index)
-	ResourceSaver.save(save_file, SAVE_FILE_PATH)
+	save_file.save()
 	Database.language = save_file.selected_language
 
 
@@ -528,7 +512,7 @@ func _on_validate_language_pressed() -> void:
 	file.close()
 	dest.close()
 	save_file.selected_language = line_edit.text
-	ResourceSaver.save(save_file, SAVE_FILE_PATH)
+	save_file.save()
 	get_tree().reload_current_scene()
 
 
@@ -688,7 +672,7 @@ func _on_open_folder_button_pressed() -> void:
 
 func _on_tab_container_tab_changed(tab: int) -> void:
 	save_file.main_menu_selected_tab = tab
-	ResourceSaver.save(save_file, SAVE_FILE_PATH)
+	save_file.save()
 
 #region Book Generation
 
