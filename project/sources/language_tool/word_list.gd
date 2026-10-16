@@ -36,9 +36,6 @@ func _ready() -> void:
 	
 	_element = element_scene.instantiate()
 	
-	ensure_column_exists(_element.table, "Reading", "1")
-	ensure_column_exists(_element.table, "Writing", "0")
-	
 	Database.db.query(_get_query())
 	
 	var results: Array[Dictionary] = Database.db.query_result
@@ -79,21 +76,6 @@ func _get_query() -> String:
 				_element.relational_table, _element.relational_table, _element.relational_table, _element.table, _element.relational_table, _element.table_graph_column,
 				_element.sub_table, _element.sub_table, _element.relational_table, _element.sub_table_id,
 				_element.table]
-
-
-func ensure_column_exists(table_name: String, column_name: String, default_value: String) -> void:
-	Database.db.query("PRAGMA table_info(%s);" % table_name)
-	var column_exists: bool = false
-	for row: Dictionary in Database.db.query_result:
-		if row.has("name") and row["name"] == column_name:
-			column_exists = true
-			break
-	
-	if not column_exists:
-		var alter_sql: String = "ALTER TABLE %s ADD COLUMN %s INTEGER DEFAULT %s;" % [table_name, column_name, default_value]
-		var result: bool = Database.db.query(alter_sql)
-		if not result:
-			Log.error("WordList: Failed to add column '%s' to table '%s'" % [column_name, table_name])
 
 
 func _input(event: InputEvent) -> void:
