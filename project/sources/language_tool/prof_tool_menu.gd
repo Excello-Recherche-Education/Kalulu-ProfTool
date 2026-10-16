@@ -57,7 +57,7 @@ func _display_available_languages() -> void:
 	for available_language: String in available_languages:
 		language_select_button.add_item(available_language)
 		if available_language == save_file.selected_language:
-			Database.language = save_file.selected_language
+			_open_language(save_file.selected_language)
 			language_select_button.select(ind)
 		ind += 1
 
@@ -483,7 +483,30 @@ func _on_language_select_button_item_selected(index: int) -> void:
 	
 	save_file.selected_language = language_select_button.get_item_text(index)
 	save_file.save()
-	Database.language = save_file.selected_language
+	_open_language(save_file.selected_language)
+
+
+## Opens a pack and brings its database to the schema this Prof Tool writes
+## (PackSchema). A pack it cannot bring there -- one made by a newer Prof Tool,
+## usually -- is closed again and nothing that reads or writes it can be pressed,
+## so no screen or export runs against a schema it does not know.
+func _open_language(language: String) -> void:
+	Database.language = language
+	var error: String = PackSchema.upgrade(Database.db) if Database.is_open else "The database of %s could not be opened." % language
+	if not error.is_empty():
+		Log.error("ProfToolMenu: %s: %s" % [language, error])
+		error_label.text = error
+		Database.close()
+	_set_pack_controls_disabled(not error.is_empty())
+
+
+func _set_pack_controls_disabled(disabled: bool) -> void:
+	var controls: Array[Node] = [$ExportButton, $CreateBookButton, $CheckIntegrityButton]
+	for tab: Node in tab_container.get_children():
+		controls.append_array(tab.get_children())
+	for control: Node in controls:
+		if control is BaseButton:
+			(control as BaseButton).disabled = disabled
 
 
 func _on_validate_language_pressed() -> void:
