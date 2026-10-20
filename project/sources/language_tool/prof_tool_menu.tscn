@@ -141,7 +141,7 @@ offset_top = 1502.0
 offset_right = 692.0
 offset_bottom = 1647.0
 theme_override_font_sizes/font_size = 100
-text = "Export
+text = "Save
 "
 
 [node name="CreateBookButton" type="Button" parent="." unique_id=1638670196]
@@ -200,7 +200,7 @@ theme_override_constants/separation = 50
 [node name="ImportLanguageButton" type="Button" parent="VBoxContainer" unique_id=2144416707]
 layout_mode = 2
 theme_override_font_sizes/font_size = 60
-text = "Import language data"
+text = "Open language.db"
 
 [node name="LanguageSelectButton" type="OptionButton" parent="VBoxContainer" unique_id=1503619054]
 unique_name_in_owner = true

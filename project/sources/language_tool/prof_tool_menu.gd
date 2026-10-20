@@ -117,7 +117,30 @@ func _on_exercises_button_pressed() -> void:
 	get_tree().change_scene_to_file("res://sources/language_tool/lesson_exercises.tscn")
 
 
-func _on_export_filename_selected(filename: String) -> void:
+## Saves the open pack as a folder: the language.db picked is where the pack's
+## database goes, and its media and generated files go beside it -- the layout
+## of a Kalulu-Languages pack, so saving onto Kalulu-Languages/fr_FR/language.db
+## updates that pack in place. Nothing is zipped.
+func _on_save_path_selected(file_path: String) -> void:
+	if file_path.get_file() != PackFolder.DATABASE_FILE_NAME:
+		error_label.text = "Save the pack as %s, not %s." % [PackFolder.DATABASE_FILE_NAME, file_path.get_file()]
+		return
+	_write_generated_files()
+	var destination: String = file_path.get_base_dir()
+	# Closed for the copy, so the language.db that leaves is complete; Windows
+	# also refuses to read a file another handle holds open for writing.
+	Database.close()
+	var error: Error = PackFolder.copy(BASE_PATH.path_join(Database.language), destination)
+	_open_language(Database.language)
+	if error != OK:
+		error_label.text = "%s could not be saved to %s (%s)." % [Database.language, destination, error_string(error)]
+		return
+	error_label.text = "%s saved to %s." % [Database.language, destination]
+
+
+## The files a saved pack carries besides its database and media: version.txt,
+## summary.txt and the four CSV lists, written into the local copy of the pack.
+func _write_generated_files() -> void:
 	_normalize_lesson_ids_before_export()
 
 	var version_file: FileAccess = FileAccess.open(BASE_PATH.path_join(Database.language).path_join("version.txt"), FileAccess.WRITE)
@@ -153,9 +176,6 @@ func _on_export_filename_selected(filename: String) -> void:
 	_create_words_csv()
 	_create_syllable_csv()
 	_create_sentence_csv()
-	
-	var folder_zipper: FolderZipper = FolderZipper.new()
-	folder_zipper.compress(BASE_PATH.path_join(Database.language), filename)
 
 
 # Forces lessons to have a lessonID corresponding to the lesson number, to avoid confusion in game requests
@@ -579,25 +599,49 @@ func _on_add_word_list_button_pressed() -> void:
 
 
 func _on_import_language_button_pressed() -> void:
+	file_dialog.title = "Open a language pack's %s" % PackFolder.DATABASE_FILE_NAME
 	file_dialog.filters = []
-	file_dialog.add_filter("*.zip", "zip")
+	file_dialog.add_filter(PackFolder.DATABASE_FILE_NAME, "Language pack database")
 	ProfToolUtils.disconnect_all(file_dialog.file_selected)
-	file_dialog.file_selected.connect(_language_data_selected)
+	file_dialog.file_selected.connect(_on_language_database_selected)
 	file_dialog.show()
 
 
 func _on_export_button_pressed() -> void:
+	file_dialog_export.title = "Save %s as a %s, beside its media" % [Database.language, PackFolder.DATABASE_FILE_NAME]
 	file_dialog_export.filters = []
-	file_dialog_export.add_filter("*.zip", "zip")
+	file_dialog_export.add_filter(PackFolder.DATABASE_FILE_NAME, "Language pack database")
+	file_dialog_export.current_file = PackFolder.DATABASE_FILE_NAME
 	ProfToolUtils.disconnect_all(file_dialog_export.file_selected)
-	file_dialog_export.file_selected.connect(_on_export_filename_selected)
+	file_dialog_export.file_selected.connect(_on_save_path_selected)
 	file_dialog_export.show()
 
 
-func _language_data_selected(file_path: String) -> void:
-	if FileAccess.file_exists(file_path):
-		var folder_unzipper: FolderUnzipper = FolderUnzipper.new()
-		folder_unzipper.extract(file_path, BASE_PATH, false)
+## Opens a pack from its language.db. The folder holding it is the pack, and its
+## name is the language's: it is copied into BASE_PATH under that name, and the
+## copy is what every screen edits until the pack is saved back out.
+func _on_language_database_selected(file_path: String) -> void:
+	if file_path.get_file() != PackFolder.DATABASE_FILE_NAME:
+		error_label.text = "A language pack's database is called %s, not %s." % [PackFolder.DATABASE_FILE_NAME, file_path.get_file()]
+		return
+	var source: String = file_path.get_base_dir()
+	var language: String = source.get_file()
+	if language.is_empty():
+		error_label.text = "%s must be inside the pack's own folder, which names the language." % PackFolder.DATABASE_FILE_NAME
+		return
+	# The local copy is about to be overwritten, and Windows refuses to replace
+	# a database that is still open.
+	var replacing_open_pack: bool = language == Database.language
+	if replacing_open_pack:
+		Database.close()
+	var error: Error = PackFolder.copy(source, BASE_PATH.path_join(language))
+	if error != OK:
+		if replacing_open_pack:
+			_open_language(language)
+		error_label.text = "%s could not be opened (%s)." % [file_path, error_string(error)]
+		return
+	save_file.selected_language = language
+	save_file.save()
 	get_tree().reload_current_scene()
 
 
