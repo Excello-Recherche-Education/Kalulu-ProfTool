@@ -18,6 +18,9 @@ var selected_language: String = ""
 ## The main menu tab to reopen on, so returning from an editor lands where the
 ## user left.
 var main_menu_selected_tab: int = 0
+## Each language's pack folder outside user://, the one it was last opened from
+## or saved to, so the open and save dialogs start there.
+var pack_folders: Dictionary[String, String] = {}
 
 
 ## The saved state; else the legacy one carried over; else a fresh one.
@@ -29,6 +32,10 @@ static func load_or_create() -> ProfToolSave:
 		if error == OK:
 			state.selected_language = str(config.get_value(SECTION, "selected_language", ""))
 			state.main_menu_selected_tab = int(config.get_value(SECTION, "main_menu_selected_tab", 0))
+			var folders: Variant = config.get_value(SECTION, "pack_folders", {})
+			if folders is Dictionary:
+				for language: Variant in folders:
+					state.pack_folders[str(language)] = str(folders[language])
 			return state
 		Log.warn("ProfToolSave: %s could not be read (%s), starting a new one" % [PATH, error_string(error)])
 	elif FileAccess.file_exists(LEGACY_PATH):
@@ -42,6 +49,7 @@ func save() -> void:
 	var config: ConfigFile = ConfigFile.new()
 	config.set_value(SECTION, "selected_language", selected_language)
 	config.set_value(SECTION, "main_menu_selected_tab", main_menu_selected_tab)
+	config.set_value(SECTION, "pack_folders", pack_folders)
 	var error: Error = config.save(PATH)
 	if error != OK:
 		Log.error("ProfToolSave: cannot write %s (%s)" % [PATH, error_string(error)])

@@ -135,6 +135,8 @@ func _on_save_path_selected(file_path: String) -> void:
 	if error != OK:
 		error_label.text = "%s could not be saved to %s (%s)." % [Database.language, destination, error_string(error)]
 		return
+	save_file.pack_folders[Database.language] = destination
+	save_file.save()
 	error_label.text = "%s saved to %s." % [Database.language, destination]
 
 
@@ -602,6 +604,7 @@ func _on_import_language_button_pressed() -> void:
 	file_dialog.title = "Open a language pack's %s" % PackFolder.DATABASE_FILE_NAME
 	file_dialog.filters = []
 	file_dialog.add_filter(PackFolder.DATABASE_FILE_NAME, "Language pack database")
+	_start_in_pack_folder(file_dialog, save_file.selected_language)
 	ProfToolUtils.disconnect_all(file_dialog.file_selected)
 	file_dialog.file_selected.connect(_on_language_database_selected)
 	file_dialog.show()
@@ -610,11 +613,25 @@ func _on_import_language_button_pressed() -> void:
 func _on_export_button_pressed() -> void:
 	file_dialog_export.title = "Save %s as a %s, beside its media" % [Database.language, PackFolder.DATABASE_FILE_NAME]
 	file_dialog_export.filters = []
-	file_dialog_export.add_filter(PackFolder.DATABASE_FILE_NAME, "Language pack database")
+	# A pattern, not the file name: in save mode the dialog matches the filter
+	# against the whole path, and on a miss appends the filter minus its first
+	# character -- a "language.db" filter saved language.db as
+	# language.dbanguage.db. _on_save_path_selected checks the name itself.
+	file_dialog_export.add_filter("*.db", "Language pack database")
+	_start_in_pack_folder(file_dialog_export, Database.language)
 	file_dialog_export.current_file = PackFolder.DATABASE_FILE_NAME
 	ProfToolUtils.disconnect_all(file_dialog_export.file_selected)
 	file_dialog_export.file_selected.connect(_on_save_path_selected)
 	file_dialog_export.show()
+
+
+## Points a dialog at the folder the language's pack was last opened from or
+## saved to, when there is one and it still exists. Otherwise the dialog stays
+## where it was.
+func _start_in_pack_folder(dialog: FileDialog, language: String) -> void:
+	var folder: String = save_file.pack_folders.get(language, "")
+	if not folder.is_empty() and DirAccess.dir_exists_absolute(folder):
+		dialog.current_dir = folder
 
 
 ## Opens a pack from its language.db. The folder holding it is the pack, and its
@@ -641,6 +658,7 @@ func _on_language_database_selected(file_path: String) -> void:
 		error_label.text = "%s could not be opened (%s)." % [file_path, error_string(error)]
 		return
 	save_file.selected_language = language
+	save_file.pack_folders[language] = source
 	save_file.save()
 	get_tree().reload_current_scene()
 
