@@ -10,14 +10,13 @@
 #
 # Everything here must depend on nothing outside this list.
 
-# The pack-format code: reading, unpacking and naming the files of a language pack.
+# The pack-format code: reading and naming the files of a language pack.
 sources/utils/autoloads/database.gd
 sources/utils/autoloads/log.gd
 sources/utils/autoloads/unicode_normalizer.gd
 sources/utils/minigame_types.gd
 sources/utils/safe_file_path.gd
 sources/utils/math/bezier.gd
-folder_unzipper.gd
 
 # The empty pack a new language starts from.
 model_database.db

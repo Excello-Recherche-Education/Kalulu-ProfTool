@@ -25,8 +25,8 @@ Kalulu-ProfTool/
 ```
 
 The Prof Tool reads and writes the same packs the game plays, so it uses the
-game's own code for that: the pack reader (`Database`), its file naming, the zip
-classes, the minigame names, plus the Kalulu theme. Those files are listed in
+game's own code for that: the pack reader (`Database`), its file naming, the
+minigame names, plus the Kalulu theme. Those files are listed in
 `shared-files.txt` and copied from `kalulu-frontend/` into `project/` **at the same
 paths**, so that nothing in either project needs to know about the other.
 
