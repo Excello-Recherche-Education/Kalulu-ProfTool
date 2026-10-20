@@ -69,8 +69,12 @@ mkdir -p build/Linux
 godot --headless --path "$PWD/project" --export-release "Linux ProfTool" "$PWD/build/Linux/Prof_Tool-Linux.zip"
 ```
 
-The macOS build is not signed by Excello, so Gatekeeper blocks it on other Macs until
-it is allowed in System Settings.
+The macOS build is signed **ad hoc** (`codesign/codesign=1`, Godot's built-in
+signer): there is no Developer ID certificate, so it is not notarized and Gatekeeper
+blocks its first launch on other Macs until it is allowed with **Open Anyway** in
+System Settings → Privacy & Security. Without that signature the app kept the Godot
+template's own, which the export invalidates, and macOS called the download
+"damaged" with no way to open it short of `xattr -cr` in Terminal.
 
 ## License
 
