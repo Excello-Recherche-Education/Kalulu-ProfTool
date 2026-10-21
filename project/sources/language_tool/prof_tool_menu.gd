@@ -654,7 +654,9 @@ func _on_language_database_selected(file_path: String) -> void:
 	var replacing_open_pack: bool = language == Database.language
 	if replacing_open_pack:
 		Database.close()
-	var error: Error = PackFolder.copy(source, BASE_PATH.path_join(language))
+	# Mirrored, not copied over: a file the pack has since dropped would stay in
+	# the local copy, and Save would put it back into the pack.
+	var error: Error = PackFolder.mirror(source, BASE_PATH.path_join(language))
 	if error != OK:
 		if replacing_open_pack:
 			_open_language(language)
