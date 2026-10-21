@@ -23,12 +23,15 @@ var total_integrity_warnings: int = 0
 @onready var file_dialog_export: FileDialog = $FileDialogExport
 @onready var add_word_list_button: Button = $VBoxContainer/AddWordListButton
 @onready var error_label: Label = %ErrorLabel
+@onready var version_label: Label = %VersionLabel
 @onready var tab_container: TabContainer = $CenterContainer/TabContainer
 @onready var check_box_log: CheckBox = $CheckIntegrityButton/CheckBoxLog
 
 
 func _ready() -> void:
 	_silence_game_music()
+	# Read from project.godot, the version the release bumps, so it cannot drift.
+	version_label.text = "Version %s" % str(ProjectSettings.get_setting("application/config/version", ""))
 	WordImporter.ensure_loaded()
 	_update_add_word_list_button()
 	save_file = ProfToolSave.load_or_create()
