@@ -56,6 +56,15 @@ disabled = true
 text = "Exception"
 expand_icon = true
 
+[node name="BookletOnlyCheckBox" type="CheckBox" parent="TabContainer/NormalContainer" unique_id=1530291847]
+unique_name_in_owner = true
+layout_mode = 2
+tooltip_text = "Booklet only: printed in the reading booklets, left out of the game"
+theme_override_font_sizes/font_size = 50
+disabled = true
+text = "Booklet"
+expand_icon = true
+
 [node name="Word" type="Label" parent="TabContainer/NormalContainer" unique_id=971120727]
 unique_name_in_owner = true
 layout_mode = 2
@@ -118,6 +127,14 @@ layout_mode = 2
 tooltip_text = "Don't show the word alone in Kalulu games"
 theme_override_font_sizes/font_size = 50
 text = "Exception"
+expand_icon = true
+
+[node name="BookletOnlyEditCheckBox" type="CheckBox" parent="TabContainer/EditContainer/HBoxContainer" unique_id=1739220584]
+unique_name_in_owner = true
+layout_mode = 2
+tooltip_text = "Only the printed reading booklets use it: the game leaves it out (it needs no recording)"
+theme_override_font_sizes/font_size = 50
+text = "Booklet only"
 expand_icon = true
 
 [node name="MinusButton" parent="TabContainer/EditContainer/HBoxContainer" unique_id=1105940208 instance=ExtResource("1_g3tt5")]

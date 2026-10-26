@@ -120,6 +120,10 @@ func _on_exercises_button_pressed() -> void:
 	get_tree().change_scene_to_file("res://sources/language_tool/lesson_exercises.tscn")
 
 
+func _on_booklets_button_pressed() -> void:
+	get_tree().change_scene_to_file("res://sources/language_tool/booklets.tscn")
+
+
 ## Saves the open pack as a folder: the language.db picked is where the pack's
 ## database goes, and its media and generated files go beside it -- the layout
 ## of a Kalulu-Languages pack, so saving onto Kalulu-Languages/fr_FR/language.db
@@ -522,6 +526,10 @@ func _open_language(language: String) -> void:
 		Log.error("ProfToolMenu: %s: %s" % [language, error])
 		error_label.text = error
 		Database.close()
+	else:
+		# Database looked for the flag when it opened the pack, which may have been
+		# before the upgrade added it.
+		Database.has_booklet_only = true
 	_set_pack_controls_disabled(not error.is_empty())
 
 

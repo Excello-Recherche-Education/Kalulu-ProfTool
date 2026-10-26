@@ -121,6 +121,17 @@ theme_override_font_sizes/font_size = 100
 text = "Kalulu Speeches
 "
 
+[node name="Booklets" type="VBoxContainer" parent="CenterContainer/TabContainer" unique_id=1407734216]
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 50
+metadata/_tab_index = 3
+
+[node name="BookletsButton" type="Button" parent="CenterContainer/TabContainer/Booklets" unique_id=1873390652]
+layout_mode = 2
+theme_override_font_sizes/font_size = 100
+text = "Booklet Chapters"
+
 [node name="Label" type="Label" parent="." unique_id=500881106]
 layout_mode = 1
 anchors_preset = 5
@@ -327,6 +338,7 @@ theme_override_font_sizes/font_size = 60
 [connection signal="pressed" from="CenterContainer/TabContainer/GameData/PseudowordsButton" to="." method="_on_pseudowords_button_pressed"]
 [connection signal="pressed" from="CenterContainer/TabContainer/GameData/ExercisesButton" to="." method="_on_exercises_button_pressed"]
 [connection signal="pressed" from="CenterContainer/TabContainer/GameData/SpeechesButton" to="." method="_on_speeches_button_pressed"]
+[connection signal="pressed" from="CenterContainer/TabContainer/Booklets/BookletsButton" to="." method="_on_booklets_button_pressed"]
 [connection signal="pressed" from="ExportButton" to="." method="_on_export_button_pressed"]
 [connection signal="pressed" from="CreateBookButton" to="." method="create_book"]
 [connection signal="pressed" from="CheckIntegrityButton" to="." method="_check_db_integrity"]

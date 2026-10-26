@@ -53,9 +53,13 @@ func _add_from_additional_word_list(new_text: String) -> int:
 	if all_found:
 		gp_ids = word_ids
 		unvalidated_gp_ids = gp_ids
+		# A sentence the game offers may not hold a word it leaves out
+		# (Kalulu-Languages SCHEMA.md rule 7).
+		booklet_only = int(_holds_booklet_only_word(word_ids))
 		
 		Database.db.insert_row("Sentences", {
 			Sentence = new_text,
+			BookletOnly = booklet_only,
 		})
 		id = Database.db.last_insert_rowid
 		for index: int in range(word_ids.size()):
@@ -71,6 +75,24 @@ func _add_from_additional_word_list(new_text: String) -> int:
 		not_found_text += " " + word_not_found 
 	not_found.emit(not_found_text)
 	return -1
+
+
+## The game leaves booklet-only words out, so a sentence holding one is
+## booklet-only too (Kalulu-Languages SCHEMA.md rule 7): validating it as a game
+## sentence marks it so again, and says why.
+func _on_validate_button_pressed() -> void:
+	super()
+	if not booklet_only and _holds_booklet_only_word(gp_ids):
+		booklet_only = 1
+		not_found.emit("Booklet only: this sentence holds a booklet-only word, which the game leaves out.")
+
+
+func _holds_booklet_only_word(word_ids: Array[int]) -> bool:
+	for word_id: int in word_ids:
+		Database.db.query_with_bindings("SELECT BookletOnly FROM Words WHERE ID = ?", [word_id])
+		if not Database.db.query_result.is_empty() and int(Database.db.query_result[0].BookletOnly) != 0:
+			return true
+	return false
 
 
 func get_graphemes(p_gp_ids: Array[int]) -> String:

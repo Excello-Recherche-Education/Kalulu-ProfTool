@@ -47,6 +47,7 @@ func _ready() -> void:
 		element.exception = elem.Exception
 		element.reading = elem.Reading
 		element.writing = elem.Writing
+		element.booklet_only = elem.BookletOnly
 		element.set_gp_ids_from_string(elem[_element.sub_table_id + "s"] as String)
 		elements_container.add_child(element)
 		element.undo_redo = undo_redo
@@ -71,18 +72,18 @@ func _ready() -> void:
 # JOIN instead: SQLite then plans it differently and group_concat stops following
 # Position, so Save, which compares that string with the list's, deletes the entry.
 func _get_query() -> String:
-	return "SELECT %s.ID as %sId, %s, group_concat(%s, ' ') as %ss, group_concat(%s, ' ') as %ss, group_concat(%s.ID, ' ') as %ss, %s.Exception, %s.Reading, %s.Writing 
+	return "SELECT %s.ID as %sId, %s, group_concat(%s, ' ') as %ss, group_concat(%s, ' ') as %ss, group_concat(%s.ID, ' ') as %ss, %s.Exception, %s.Reading, %s.Writing, %s.BookletOnly 
 			FROM %s 
 			INNER JOIN ( SELECT * FROM %s ORDER BY %s.Position ) %s ON %s.ID = %s.%sID 
 			INNER JOIN %s ON %s.ID = %s.%s
 			GROUP BY %s.ID
 			UNION ALL
-			SELECT ID, %s, '', '', '', Exception, Reading, Writing
+			SELECT ID, %s, '', '', '', Exception, Reading, Writing, BookletOnly
 			FROM %s
 			WHERE ID NOT IN ( SELECT %sID FROM %s )" % [_element.table, _element.table_graph_column,
 				_element.table_graph_column, _element.sub_table_graph_column, _element.sub_table_graph_column,
 				_element.sub_table_phon_column, _element.sub_table_phon_column,
-				_element.sub_table, _element.sub_table_id, _element.table, _element.table, _element.table,
+				_element.sub_table, _element.sub_table_id, _element.table, _element.table, _element.table, _element.table,
 				_element.table,
 				_element.relational_table, _element.relational_table, _element.relational_table, _element.table, _element.relational_table, _element.table_graph_column,
 				_element.sub_table, _element.sub_table, _element.relational_table, _element.sub_table_id,
