@@ -36,7 +36,6 @@ const FIRST_FONTS: PackedStringArray = ["", "Script", "Cursive"]
 ## sentence parser's, plus the typography a story carries. An apostrophe cuts too,
 ## so "l'ours" is the words "l" and "ours", as the Sentence List stores it.
 const SEPARATORS: String = "'’!()[]{};:\"\\,<>./?@#$%^&*_~«»…–—"
-const SENTENCE_LIST_ELEMENT_SCENE: PackedScene = preload("res://sources/language_tool/sentence_list_element.tscn")
 
 ## A chapter of a booklet and everything listed in it.
 class Chapter:
@@ -78,6 +77,8 @@ var gps: Dictionary[int, Dictionary] = {}
 ## (no decomposition, or a GP no lesson teaches).
 var word_lessons: Dictionary[String, int] = {}
 var syllable_lessons: Dictionary[String, int] = {}
+## Lowercased word -> its ID in Words.
+var word_ids: Dictionary[String, int] = {}
 ## Sentence ID -> {text, lesson, booklet_only}.
 var sentences: Dictionary[int, Dictionary] = {}
 ## Normalized sentence text -> sentence ID.
@@ -145,28 +146,43 @@ func load_from_database() -> void:
 func refresh_lists() -> void:
 	_load_gps()
 	word_lessons = _readable_lessons("Words", "Word", "GPsInWords", "WordID")
+	word_ids.clear()
+	Database.db.query("SELECT ID, Word FROM Words")
+	for row: Dictionary in Database.db.query_result:
+		word_ids[str(row.Word).to_lower()] = int(row.ID)
 	syllable_lessons = _readable_lessons("Syllables", "Syllable", "GPsInSyllables", "SyllableID")
 	_load_sentences()
 
 
-## Adds a sentence to the Sentence List, as the list itself does from a text:
-## every word must already be a word of the pack, or be completed from the
-## additional word list. The sentence is booklet-only, and so is every word the
-## additional list brought in for it, so the game does not change. Returns the
-## words that could not be found, empty when the sentence was added.
+## Adds a sentence to the Sentence List, booklet-only, linked word by word to
+## Words as the list links its own. Every word must already be in the Word List:
+## a word needs a decomposition someone chose, so none is made up here. Writes
+## nothing unless every word is found, and all of it in one transaction.
+## Returns the words not found, empty once the sentence is added.
 func add_booklet_sentence(text: String) -> PackedStringArray:
-	var db: SQLite = Database.db
-	db.query("SELECT COALESCE(MAX(ID), 0) AS Last FROM Words")
-	var last_word_id: int = int(db.query_result[0].Last)
-	var element: SentenceListElement = SENTENCE_LIST_ELEMENT_SCENE.instantiate()
+	var linked: Array[int] = []
 	var missing: PackedStringArray = []
-	var sentence_id: int = element._add_from_additional_word_list(text)
-	if sentence_id < 0:
-		missing = element.words_not_founds.duplicate()
-	else:
-		db.query_with_bindings("UPDATE Sentences SET BookletOnly = 1 WHERE ID = ?", [sentence_id])
-	db.query_with_bindings("UPDATE Words SET BookletOnly = 1 WHERE ID > ?", [last_word_id])
-	element.free()
+	for word: String in words_of(text):
+		if word_ids.has(word):
+			linked.append(word_ids[word])
+		elif not word in missing:
+			missing.append(word)
+	if not missing.is_empty() or linked.is_empty():
+		return missing
+	var db: SQLite = Database.db
+	if not db.query("BEGIN TRANSACTION"):
+		return missing
+	if not db.query_with_bindings('INSERT INTO "Sentences" ("Sentence", "BookletOnly") VALUES (?, 1)', [text.strip_edges()]):
+		_rollback("adding a sentence")
+		return missing
+	var sentence_id: int = db.last_insert_rowid
+	for position: int in range(linked.size()):
+		if not db.query_with_bindings('INSERT INTO "WordsInSentences" ("SentenceID", "WordID", "Position") VALUES (?, ?, ?)',
+				[sentence_id, linked[position], position]):
+			_rollback("linking a sentence to its words")
+			return missing
+	if not db.query("COMMIT"):
+		_rollback("adding a sentence")
 	return missing
 
 
