@@ -55,6 +55,7 @@ func _ready() -> void:
 		element.gps_updated.connect(_on_gps_updated)
 		element.update_lesson()
 	
+	_show_no_decomposition_count()
 	title.set_title(_element.table_graph_column + " List")
 	lesson_title.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	word_title.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
@@ -63,19 +64,31 @@ func _ready() -> void:
 	_reorder_by("lesson")
 
 
+# The INNER JOIN query lists every entry that has a decomposition, its parts in
+# Position order; the second SELECT adds the entries that have none, with empty
+# strings for their parts, which the INNER JOIN matched nowhere and so could be
+# neither seen, decomposed nor deleted here. Do not turn the first one into a LEFT
+# JOIN instead: SQLite then plans it differently and group_concat stops following
+# Position, so Save, which compares that string with the list's, deletes the entry.
 func _get_query() -> String:
 	return "SELECT %s.ID as %sId, %s, group_concat(%s, ' ') as %ss, group_concat(%s, ' ') as %ss, group_concat(%s.ID, ' ') as %ss, %s.Exception, %s.Reading, %s.Writing 
 			FROM %s 
 			INNER JOIN ( SELECT * FROM %s ORDER BY %s.Position ) %s ON %s.ID = %s.%sID 
 			INNER JOIN %s ON %s.ID = %s.%s
-			GROUP BY %s.ID" % [_element.table, _element.table_graph_column,
+			GROUP BY %s.ID
+			UNION ALL
+			SELECT ID, %s, '', '', '', Exception, Reading, Writing
+			FROM %s
+			WHERE ID NOT IN ( SELECT %sID FROM %s )" % [_element.table, _element.table_graph_column,
 				_element.table_graph_column, _element.sub_table_graph_column, _element.sub_table_graph_column,
 				_element.sub_table_phon_column, _element.sub_table_phon_column,
 				_element.sub_table, _element.sub_table_id, _element.table, _element.table, _element.table,
 				_element.table,
 				_element.relational_table, _element.relational_table, _element.relational_table, _element.table, _element.relational_table, _element.table_graph_column,
 				_element.sub_table, _element.sub_table, _element.relational_table, _element.sub_table_id,
-				_element.table]
+				_element.table,
+				_element.table_graph_column, _element.table,
+				_element.table_graph_column, _element.relational_table]
 
 
 func _input(event: InputEvent) -> void:
@@ -178,6 +191,24 @@ func _on_back_button_pressed() -> void:
 
 func _reorder_by(property_name: String) -> void:
 	ProfToolUtils.reorder_children_by_property(elements_container, property_name)
+	# Entries with no decomposition stay at the top whatever the sort, in the
+	# order it gave them.
+	var undecomposed: Array[WordListElement] = []
+	for element: WordListElement in elements_container.get_children():
+		if element.has_no_decomposition():
+			undecomposed.append(element)
+	for index: int in range(undecomposed.size()):
+		elements_container.move_child(undecomposed[index], index)
+
+
+func _show_no_decomposition_count() -> void:
+	var count: int = 0
+	for element: WordListElement in elements_container.get_children():
+		if element.has_no_decomposition():
+			count += 1
+	if count > 0:
+		var noun: String = _element.table_graph_column.to_lower()
+		error_label.text = "⚠ %d %s(s) with no %s, at the top of the list: add them, or delete the %s(s)." % [count, noun, _element.sub_table, noun]
 
 
 func _on_list_title_add_pressed() -> void:
