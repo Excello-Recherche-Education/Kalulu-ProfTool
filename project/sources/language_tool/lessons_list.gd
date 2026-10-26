@@ -85,8 +85,17 @@ func _on_lesson_dropped(before: bool, number: int, dropped_number: int) -> void:
 
 
 func _on_save_button_pressed() -> void:
-	Database.db.query("DELETE FROM GPsInLessons")
 	var children: Array[Node] = lessons_container.get_children()
+	# Lessons past the last one shown are deleted below, and their booklet
+	# chapters with them (ON DELETE CASCADE), lists, stories and all.
+	if not _lessons_with_chapters_after(children.size()).is_empty():
+		var dialog: AcceptDialog = AcceptDialog.new()
+		dialog.title = "Not saved"
+		dialog.dialog_text = "Lessons %s have booklet chapters, and saving would delete them. Move or delete those chapters in Booklet Chapters first." % ", ".join(_lessons_with_chapters_after(children.size()))
+		add_child(dialog)
+		dialog.popup_centered()
+		return
+	Database.db.query("DELETE FROM GPsInLessons")
 	for index: int in range(children.size()):
 		var child: LessonContainer = children[index]
 		Database.db.query_with_bindings("SELECT * FROM Lessons WHERE LessonNb = ?", [index + 1])
@@ -108,6 +117,16 @@ func _on_save_button_pressed() -> void:
 			})
 	
 	Database.db.query_with_bindings("DELETE FROM Lessons WHERE LessonNb > ?", [children.size()])
+
+
+func _lessons_with_chapters_after(last_lesson: int) -> PackedStringArray:
+	var numbers: PackedStringArray = []
+	Database.db.query_with_bindings("SELECT DISTINCT Lessons.LessonNb AS LessonNb FROM BookletChapters
+		INNER JOIN Lessons ON Lessons.ID = BookletChapters.LessonID
+		WHERE Lessons.LessonNb > ? ORDER BY Lessons.LessonNb", [last_lesson])
+	for row: Dictionary in Database.db.query_result:
+		numbers.append(str(row.LessonNb))
+	return numbers
 
 
 func _on_back_button_pressed() -> void:

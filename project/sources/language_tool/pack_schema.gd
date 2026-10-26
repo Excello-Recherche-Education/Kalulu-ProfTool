@@ -217,7 +217,7 @@ static func _to_v2(db: SQLite) -> String:
 	var steps: Array[String] = ["BEGIN TRANSACTION"]
 	for table: String in ["Words", "Syllables", "Sentences"]:
 		if not "BookletOnly" in _columns(db, table):
-			steps.append('ALTER TABLE "%s" ADD COLUMN "BookletOnly" INTEGER DEFAULT 0' % table)
+			steps.append('ALTER TABLE "%s" ADD COLUMN "BookletOnly" INTEGER NOT NULL DEFAULT 0' % table)
 	for table: String in BOOKLET_TABLES_V2:
 		if not _table_exists(db, table):
 			steps.append(BOOKLET_TABLES_V2[table])

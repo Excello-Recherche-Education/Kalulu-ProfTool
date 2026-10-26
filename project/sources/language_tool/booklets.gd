@@ -361,14 +361,14 @@ func _show_chapter(chapter: BookletData.Chapter) -> void:
 	_editor.add_child(_label("One entry per line, as printed (\"la Lune\", \"un vélo\"). Empty: chosen from the words the lesson can read."))
 	_add_entries_editor(chapter, BookletData.Part.WORDS, 260)
 	_heading("Sentences")
-	_editor.add_child(_label("Alternating: script and cursive take turns, paragraph by paragraph. One printed line per line, \" | \" between sentences on the same line, an empty line between paragraphs. Every sentence must be in the Sentence List. Empty: every sentence of the lesson, a paragraph each."))
+	_editor.add_child(_label("Alternating: script and cursive take turns, paragraph by paragraph. One printed line per line, \" | \" between sentences on the same line, an empty line between paragraphs, %s for a line break inside a sentence. Every sentence must be in the Sentence List. Empty: every sentence of the lesson, a paragraph each." % BookletData.LINE_BREAK))
 	var sentences_edit: TextEdit = _text_edit(_sentence_drafts.get(chapter, data.sentences_text(chapter)), 360,
 			_on_sentences_changed.bind(chapter))
 	_editor.add_child(sentences_edit)
 	_add_missing_button = _button("Add the missing sentences, booklet only", _on_add_missing_pressed.bind(chapter, sentences_edit))
 	_editor.add_child(_add_missing_button)
 	_heading("Penguin tables")
-	_editor.add_child(_label("One row per line, \"left | right\". Start a line with * for a bold row, which begins a new table."))
+	_editor.add_child(_label("One row per line, \"left | right\". Start a line with * for a bold row, which begins a new table; \\* for a cell that starts with a star."))
 	_add_entries_editor(chapter, BookletData.Part.TABLES, 220)
 	_heading("Writing page")
 	_editor.add_child(_label("One item per line: a grapheme, a syllable or words (\"un vélo\"). Empty: no writing page."))
@@ -508,23 +508,31 @@ func _on_sentences_changed(text: String, chapter: BookletData.Chapter) -> void:
 func _on_add_missing_pressed(chapter: BookletData.Chapter, sentences_edit: TextEdit) -> void:
 	var text: String = sentences_edit.text
 	var not_found: PackedStringArray = []
+	var errors: PackedStringArray = []
+	# Each one is known the moment it is added, so the same sentence typed twice
+	# is added once.
 	for missing: String in data.parse_sentences(text).missing:
-		for word: String in data.add_booklet_sentence(missing):
+		var result: Dictionary = data.add_booklet_sentence(missing)
+		for word: String in result.missing:
 			if not word in not_found:
 				not_found.append(word)
-	data.refresh_lists()
+		if not str(result.error).is_empty():
+			errors.append(result.error)
 	_on_sentences_changed(text, chapter)
 	_show_problems()
-	if not_found.is_empty():
-		_status.text = "Missing sentences added to the Sentence List, booklet only."
-	else:
+	if not errors.is_empty():
+		_status.text = "Some sentences could not be added: " + "; ".join(errors)
+	elif not not_found.is_empty():
 		_status.text = "Some sentences could not be added: add these words to the Word List first: " + ", ".join(not_found)
+	else:
+		_status.text = "Missing sentences added to the Sentence List, booklet only."
 
 
 func _show_problems() -> void:
 	if _chapter == null or _problems_label == null:
 		return
-	var found: PackedStringArray = data.problems(_chapter)
+	var found: PackedStringArray = data.save_errors()
+	found.append_array(data.problems(_chapter))
 	var missing: PackedStringArray = data.parse_sentences(_sentence_drafts[_chapter]).missing if _sentence_drafts.has(_chapter) else PackedStringArray()
 	for text: String in missing:
 		found.insert(0, "Sentence \"%s\" is not in the Sentence List" % text)

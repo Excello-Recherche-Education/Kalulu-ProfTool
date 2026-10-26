@@ -79,12 +79,13 @@ func _add_from_additional_word_list(new_text: String) -> int:
 
 ## The game leaves booklet-only words out, so a sentence holding one is
 ## booklet-only too (Kalulu-Languages SCHEMA.md rule 7): validating it as a game
-## sentence marks it so again, and says why.
+## sentence ticks the box again, and says why. Ticked before the edit is
+## recorded, so Undo and Redo keep the two together.
 func _on_validate_button_pressed() -> void:
-	super()
-	if not booklet_only and _holds_booklet_only_word(gp_ids):
-		booklet_only = 1
+	if not booklet_only_edit_checkbox.button_pressed and _holds_booklet_only_word(unvalidated_gp_ids):
+		booklet_only_edit_checkbox.button_pressed = true
 		not_found.emit("Booklet only: this sentence holds a booklet-only word, which the game leaves out.")
+	super()
 
 
 func _holds_booklet_only_word(word_ids: Array[int]) -> bool:

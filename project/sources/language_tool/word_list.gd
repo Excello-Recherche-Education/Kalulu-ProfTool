@@ -184,6 +184,21 @@ func _on_save_button_pressed() -> void:
 		if not found:
 			Database.db.delete_rows(_element.table, "ID=%s" % elem[_element.table_graph_column + "Id"])
 	undo_redo.clear_history()
+	_mark_sentences_of_booklet_only_words()
+
+
+## A game sentence holding a booklet-only word would bring that word back into
+## the game (Kalulu-Languages SCHEMA.md rule 7), so ticking Booklet only on a
+## word, or saving a sentence, makes every such sentence booklet-only too.
+func _mark_sentences_of_booklet_only_words() -> void:
+	Database.db.query("UPDATE Sentences SET BookletOnly = 1 WHERE BookletOnly = 0 AND ID IN (
+		SELECT WordsInSentences.SentenceID FROM WordsInSentences
+		INNER JOIN Words ON Words.ID = WordsInSentences.WordID
+		WHERE Words.BookletOnly = 1)")
+	Database.db.query("SELECT changes() AS Count")
+	var count: int = int(Database.db.query_result[0].Count) if not Database.db.query_result.is_empty() else 0
+	if count > 0:
+		error_label.text = "%d sentence(s) holding a booklet-only word are now booklet-only too." % count
 
 
 func _on_back_button_pressed() -> void:

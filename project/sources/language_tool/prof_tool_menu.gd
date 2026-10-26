@@ -247,6 +247,17 @@ func _check_db_integrity() -> void:
 		if FileAccess.file_exists(integrity_log_path):
 			DirAccess.remove_absolute(integrity_log_path)
 	
+	# The checks below see the game's entries only: the game leaves booklet-only
+	# ones out. A game sentence holding a booklet-only word is said so here,
+	# rather than as a word "not introduced yet" (Kalulu-Languages SCHEMA.md rule 7).
+	Database.db.query("SELECT DISTINCT Sentences.Sentence AS Sentence, Words.Word AS Word FROM Sentences
+		INNER JOIN WordsInSentences ON WordsInSentences.SentenceID = Sentences.ID
+		INNER JOIN Words ON Words.ID = WordsInSentences.WordID
+		WHERE Sentences.BookletOnly = 0 AND Words.BookletOnly = 1")
+	for row: Dictionary in Database.db.query_result.duplicate():
+		if !log_message("Sentence \"%s\" is offered by the game but holds the booklet-only word \"%s\": mark it booklet-only" % [row.Sentence, row.Word]):
+			return
+
 	var sentences_list: Dictionary = Database.get_sentences_by_lessons()
 	if sentences_list.is_empty():
 		if !log_message("No sentence found in database"):
@@ -529,7 +540,7 @@ func _open_language(language: String) -> void:
 	else:
 		# Database looked for the flag when it opened the pack, which may have been
 		# before the upgrade added it.
-		Database.has_booklet_only = true
+		Database.detect_booklet_only()
 	_set_pack_controls_disabled(not error.is_empty())
 
 

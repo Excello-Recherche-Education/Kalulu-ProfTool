@@ -30,12 +30,15 @@ const SETTINGS: Dictionary[String, Array] = {
 	"WritingTracings": ["Writing: grey copies to trace", 0, -1, false],
 }
 const SENTENCE_FONTS: PackedStringArray = ["Alternating", "Script only", "Cursive only"]
+const SENTENCE_FONT_CURSIVE: int = 2
 const FIRST_FONTS: PackedStringArray = ["", "Script", "Cursive"]
 
 ## Characters a booklet text is cut into words at, besides spaces: the Prof Tool's
 ## sentence parser's, plus the typography a story carries. An apostrophe cuts too,
 ## so "l'ours" is the words "l" and "ours", as the Sentence List stores it.
-const SEPARATORS: String = "'’!()[]{};:\"\\,<>./?@#$%^&*_~«»…–—"
+## How the Sentences box shows a line break that is part of a sentence.
+const LINE_BREAK: String = "⏎"
+const SEPARATORS: String = "'’!()[]{};:\"\\,<>./?@#$%^&*_~«»…–—|"
 
 ## A chapter of a booklet and everything listed in it.
 class Chapter:
@@ -158,32 +161,53 @@ func refresh_lists() -> void:
 ## Words as the list links its own. Every word must already be in the Word List:
 ## a word needs a decomposition someone chose, so none is made up here. Writes
 ## nothing unless every word is found, and all of it in one transaction.
-## Returns the words not found, empty once the sentence is added.
-func add_booklet_sentence(text: String) -> PackedStringArray:
+## A sentence already in the list, or added a moment ago, is not added twice.
+## Returns {missing: the words not found, error: why nothing was written, or ""}.
+func add_booklet_sentence(text: String) -> Dictionary:
+	var result: Dictionary = {missing = PackedStringArray(), error = ""}
+	if find_sentence(text) >= 0:
+		return result
 	var linked: Array[int] = []
-	var missing: PackedStringArray = []
 	for word: String in words_of(text):
 		if word_ids.has(word):
 			linked.append(word_ids[word])
-		elif not word in missing:
-			missing.append(word)
-	if not missing.is_empty() or linked.is_empty():
-		return missing
+		elif not word in result.missing:
+			(result.missing as PackedStringArray).append(word)
+	if not (result.missing as PackedStringArray).is_empty():
+		return result
+	if linked.is_empty():
+		result.error = "\"%s\" has no word in it" % text.strip_edges()
+		return result
 	var db: SQLite = Database.db
 	if not db.query("BEGIN TRANSACTION"):
-		return missing
+		result.error = db.get_error_message()
+		return result
 	if not db.query_with_bindings('INSERT INTO "Sentences" ("Sentence", "BookletOnly") VALUES (?, 1)', [text.strip_edges()]):
-		_rollback("adding a sentence")
-		return missing
+		result.error = _rollback("adding a sentence")
+		return result
 	var sentence_id: int = db.last_insert_rowid
 	for position: int in range(linked.size()):
 		if not db.query_with_bindings('INSERT INTO "WordsInSentences" ("SentenceID", "WordID", "Position") VALUES (?, ?, ?)',
 				[sentence_id, linked[position], position]):
-			_rollback("linking a sentence to its words")
-			return missing
+			result.error = _rollback("linking a sentence to its words")
+			return result
 	if not db.query("COMMIT"):
-		_rollback("adding a sentence")
-	return missing
+		result.error = _rollback("adding a sentence")
+		return result
+	var lesson: int = 0
+	for word_id: int in linked:
+		var word_lesson: int = word_lessons.get(_word_text(word_id), -1)
+		lesson = -1 if lesson < 0 or word_lesson < 0 else maxi(lesson, word_lesson)
+	sentences[sentence_id] = {text = text.strip_edges(), lesson = lesson, booklet_only = true}
+	_sentence_ids[normalize(text)] = sentence_id
+	return result
+
+
+func _word_text(word_id: int) -> String:
+	for word: String in word_ids:
+		if word_ids[word] == word_id:
+			return word
+	return ""
 
 
 func _load_gps() -> void:
@@ -244,8 +268,10 @@ func _load_sentences() -> void:
 ## Sentence text as the Booklets screen matches it: spaces collapsed and trimmed,
 ## case ignored.
 static func normalize(text: String) -> String:
-	var words: PackedStringArray = text.strip_edges().split(" ", false)
-	return " ".join(words).to_lower()
+	var lines: PackedStringArray = []
+	for line: String in text.strip_edges().split("\n"):
+		lines.append(" ".join(line.split(" ", false)))
+	return "\n".join(lines).to_lower()
 
 
 func find_sentence(text: String) -> int:
@@ -350,7 +376,8 @@ func value_of(chapter: Chapter, column: String) -> float:
 #region Sentences as text
 
 ## A chapter's sentences as the screen edits them: one line per printed line,
-## " | " between sentences sharing a line, an empty line between paragraphs.
+## " | " between sentences sharing a line, an empty line between paragraphs. A
+## line break inside a sentence (SCHEMA.md allows one) is written LINE_BREAK.
 func sentences_text(chapter: Chapter) -> String:
 	var text: String = ""
 	for index: int in range(chapter.sentences.size()):
@@ -363,7 +390,7 @@ func sentences_text(chapter: Chapter) -> String:
 					text += "\n"
 				_:
 					text += "\n\n"
-		text += sentences[item.id].text if sentences.has(item.id) else "?"
+		text += (sentences[item.id].text as String).replace("\n", LINE_BREAK) if sentences.has(item.id) else "?"
 	return text
 
 
@@ -380,9 +407,10 @@ func parse_sentences(text: String) -> Dictionary:
 		for piece: String in line.split("|"):
 			if piece.strip_edges().is_empty():
 				continue
-			var sentence_id: int = find_sentence(piece)
+			var sentence_text: String = piece.replace(LINE_BREAK, "\n")
+			var sentence_id: int = find_sentence(sentence_text)
 			if sentence_id < 0:
-				missing.append(piece.strip_edges())
+				missing.append(sentence_text.strip_edges())
 			else:
 				found.append({id = sentence_id, brk = brk})
 			brk = Break.SAME_LINE
@@ -394,7 +422,7 @@ func parse_sentences(text: String) -> Dictionary:
 #region Entries as text
 
 ## A part's entries, one per line; a table row as "left | right", a header row
-## starting with "*".
+## starting with "*". A table cell that itself starts with "*" is written "\\*".
 static func entries_text(entries: Array) -> String:
 	var lines: PackedStringArray = []
 	for entry: Dictionary in entries:
@@ -403,6 +431,8 @@ static func entries_text(entries: Array) -> String:
 			line += " | " + str(entry.text2)
 		if entry.header:
 			line = "* " + line
+		elif line.begins_with("*"):
+			line = "\\" + line
 		lines.append(line)
 	return "\n".join(lines)
 
@@ -414,12 +444,16 @@ static func parse_entries(text: String, part: int) -> Array[Dictionary]:
 		if stripped.is_empty():
 			continue
 		var header: bool = false
-		if part == Part.TABLES and stripped.begins_with("*"):
+		if part == Part.TABLES and stripped.begins_with("\\*"):
+			stripped = stripped.trim_prefix("\\")
+		elif part == Part.TABLES and stripped.begins_with("*"):
 			header = true
 			stripped = stripped.trim_prefix("*").strip_edges()
+		# The right cell is everything after the first "|": a third cell is kept,
+		# and pointed out by problems(), rather than lost.
 		var text2: String = ""
 		if part == Part.TABLES and "|" in stripped:
-			text2 = stripped.get_slice("|", 1).strip_edges()
+			text2 = stripped.substr(stripped.find("|") + 1).strip_edges()
 			stripped = stripped.get_slice("|", 0).strip_edges()
 		entries.append({text = stripped, text2 = text2, header = header})
 	return entries
@@ -428,11 +462,43 @@ static func parse_entries(text: String, part: int) -> Array[Dictionary]:
 
 #region What a chapter prints that its lesson cannot read
 
+## What would make the booklet tables unreadable (SCHEMA.md rule 8), one line
+## each; Save refuses while there is any. Booklets are numbered 1, 2, 3... along
+## the chapters, each chapter in the same booklet as the one before or the next,
+## and nothing is printed in cursive for a language written without it.
+func save_errors() -> PackedStringArray:
+	sort_chapters()
+	var errors: PackedStringArray = []
+	var previous: Chapter = null
+	for chapter: Chapter in chapters:
+		var allowed: Array[int] = [1]
+		if previous != null:
+			allowed = [previous.booklet, previous.booklet + 1]
+		if not chapter.booklet in allowed:
+			errors.append("%s is in booklet %d, but must be in booklet %s" % [
+					chapter_name(chapter), chapter.booklet, " or ".join(PackedStringArray(allowed.map(func(number: int) -> String: return str(number))))])
+		previous = chapter
+	if settings.get("Cursive", 1.0) == 0.0:
+		if int(settings.get("SentenceFont", 0.0)) == SENTENCE_FONT_CURSIVE:
+			errors.append("The language is written without cursive, but its sentences are set to cursive only")
+		for chapter: Chapter in chapters:
+			if int(chapter.overrides.get("SentenceFont", -1.0)) == SENTENCE_FONT_CURSIVE:
+				errors.append("%s: sentences set to cursive only, in a language written without cursive" % chapter_name(chapter))
+	return errors
+
+
+func chapter_name(chapter: Chapter) -> String:
+	return "Lesson %d, chapter %d" % [chapter.lesson_nb, chapter.position + 1]
+
+
 ## The problems of a chapter, one line each: what it prints that is unknown to
 ## the pack, or readable only after its lesson. Nothing here blocks saving; the
 ## validator reports the sentences again (rule 9), the generator the rest.
 func problems(chapter: Chapter) -> PackedStringArray:
 	var found: PackedStringArray = []
+	for entry: Dictionary in chapter.get_entries(Part.TABLES):
+		if "|" in str(entry.text2):
+			found.append("Table row \"%s | %s\": a table has two cells; the second holds all the rest" % [entry.text, entry.text2])
 	for gp_id: int in chapter.gp_ids:
 		var lesson: int = gps[gp_id].lesson if gps.has(gp_id) else -1
 		if lesson < 0 or lesson > chapter.lesson_nb:
@@ -460,12 +526,15 @@ func problems(chapter: Chapter) -> PackedStringArray:
 	for story: Dictionary in chapter.stories:
 		var unknown: PackedStringArray = []
 		var later: PackedStringArray = []
+		var seen: Dictionary[String, bool] = {}
 		for word: String in words_of(str(story.title) + " " + str(story.text)):
+			if seen.has(word):
+				continue
+			seen[word] = true
 			var lesson: int = word_lessons.get(word, -2)
-			if lesson == -2 or lesson == -1:
-				if not word in unknown:
-					unknown.append(word)
-			elif lesson > chapter.lesson_nb and not word in later:
+			if lesson < 0:
+				unknown.append(word)
+			elif lesson > chapter.lesson_nb:
 				later.append("%s (%d)" % [word, lesson])
 		if not unknown.is_empty():
 			found.append("Story \"%s\": not studied: %s" % [story.title, ", ".join(unknown)])
@@ -514,8 +583,26 @@ func _printed_before(chapter: Chapter) -> Dictionary[String, bool]:
 #region Saving
 
 ## Writes everything back in one transaction. Chapters keep their IDs; their
-## lists are rewritten. Returns an empty string, or the error.
+## lists are rewritten. Returns an empty string, or the error. Refuses what
+## save_errors() reports.
 func save_to_database() -> String:
+	var errors: PackedStringArray = save_errors()
+	if not errors.is_empty():
+		return "Not saved: " + "; ".join(errors)
+	var new_chapters: Array[Chapter] = []
+	for chapter: Chapter in chapters:
+		if chapter.id < 0:
+			new_chapters.append(chapter)
+	var error: String = _save_all()
+	if not error.is_empty():
+		# Rolled back, so the IDs the new chapters were given no longer exist and
+		# the next insert may be given them again: they are new chapters still.
+		for chapter: Chapter in new_chapters:
+			chapter.id = -1
+	return error
+
+
+func _save_all() -> String:
 	sort_chapters()
 	var db: SQLite = Database.db
 	var steps: Array[Array] = []
