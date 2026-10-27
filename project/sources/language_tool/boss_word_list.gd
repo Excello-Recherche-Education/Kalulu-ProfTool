@@ -20,7 +20,8 @@ func _ready() -> void:
 		)")
 
 	
-	query = "SELECT ID, Word FROM Words WHERE Words.Exception = 0"
+	# The game leaves booklet-only words, and so their pseudowords, out.
+	query = "SELECT ID, Word FROM Words WHERE Words.Exception = 0 AND Words.BookletOnly = 0"
 	Database.db.query(query)
 	word_list = Database.db.query_result.duplicate()
 	

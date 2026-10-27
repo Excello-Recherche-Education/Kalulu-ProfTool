@@ -53,9 +53,10 @@ func _add_from_additional_word_list(new_text: String) -> int:
 	if all_found:
 		gp_ids = word_ids
 		unvalidated_gp_ids = gp_ids
-		# A sentence the game offers may not hold a word it leaves out
-		# (Kalulu-Languages SCHEMA.md rule 7).
-		booklet_only = int(_holds_booklet_only_word(word_ids))
+		# Booklet only when the box is ticked, or when it holds a word the game
+		# leaves out (Kalulu-Languages SCHEMA.md rule 7) -- never unticked here.
+		var ticked: bool = booklet_only_edit_checkbox != null and booklet_only_edit_checkbox.button_pressed
+		booklet_only = int(bool(booklet_only) or ticked or _holds_booklet_only_word(word_ids))
 		
 		Database.db.insert_row("Sentences", {
 			Sentence = new_text,

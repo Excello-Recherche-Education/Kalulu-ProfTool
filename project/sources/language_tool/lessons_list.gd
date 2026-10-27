@@ -9,21 +9,22 @@ var lessons: Dictionary[int, LessonContainer] = {}
 
 
 func _ready() -> void:
-	Database.db.query("Select Grapheme, Phoneme, LessonNb, Lessons.ID AS LessonID, GPID FROM Lessons
+	# Every lesson, those without a GP included: one that has booklet chapters
+	# must be seen to be dealt with (see _on_save_button_pressed).
+	Database.db.query("SELECT ID, LessonNb FROM Lessons ORDER BY LessonNb")
+	for element: Dictionary in Database.db.query_result.duplicate():
+		var lesson_container: LessonContainer = lesson_container_scene.instantiate()
+		lessons_container.add_child(lesson_container)
+		lesson_container.number = element.LessonNb
+		lesson_container.lesson_id = element.ID
+		lesson_container.lesson_dropped.connect(_on_lesson_dropped)
+		lessons[element.LessonNb] = lesson_container
+	Database.db.query("Select Grapheme, Phoneme, LessonNb, GPID FROM Lessons
 		INNER JOIN GPsInLessons ON GPsInLessons.LessonID = Lessons.ID
 		INNER JOIN GPs ON GPsInLessons.GPID = GPs.ID
-		ORDER BY LessonNb")
+		ORDER BY LessonNb, GPsInLessons.ID")
 	for element: Dictionary in Database.db.query_result:
-		if lessons.has(element.LessonNb):
-			(lessons[element.LessonNb] as LessonContainer).add_gp({grapheme = element.Grapheme, phoneme = element.Phoneme, gp_id = element.GPID})
-		else:
-			var lesson_container: LessonContainer = lesson_container_scene.instantiate()
-			lessons_container.add_child(lesson_container)
-			lesson_container.add_gp({grapheme = element.Grapheme, phoneme = element.Phoneme, gp_id = element.GPID})
-			lesson_container.number = element.LessonNb
-			lesson_container.lesson_id = element.LessonID
-			lesson_container.lesson_dropped.connect(_on_lesson_dropped)
-			lessons[element.LessonNb] = lesson_container
+		(lessons[element.LessonNb] as LessonContainer).add_gp({grapheme = element.Grapheme, phoneme = element.Phoneme, gp_id = element.GPID})
 	
 	Database.db.query("SELECT Grapheme, Phoneme, GPs.ID as GPID FROM GPs
 		WHERE NOT EXISTS(SELECT 1 FROM GPsInLessons WHERE GPs.ID=GPsInLessons.GPID)")
@@ -85,20 +86,28 @@ func _on_lesson_dropped(before: bool, number: int, dropped_number: int) -> void:
 		lessons[child.number] = child
 
 
-## Writes the lessons in their on-screen order onto the Lessons rows, by number,
+## Writes the lessons that have GPs, in their on-screen order, onto the Lessons
+## rows by number -- a lesson left without GPs is dropped, as it always was --
 ## then moves every booklet chapter to the row its lesson's content now sits on,
-## so a chapter follows its lesson when lessons are dragged around. Refuses to
-## save when a lesson that has chapters is left without GPs: it would vanish
-## from the list on the next load, and its chapters would be stranded.
+## so a chapter follows its lesson when lessons are dragged around. Refuses,
+## before writing anything, to drop a lesson that has chapters, or to move
+## lessons so that the chapters' booklets no longer run 1, 2, 3...
 func _on_save_button_pressed() -> void:
-	var children: Array[Node] = lessons_container.get_children()
+	var all_children: Array[Node] = lessons_container.get_children()
 	var chapters_by_lesson: Dictionary[int, Array] = _chapter_ids_by_lesson()
 	var stranded: PackedStringArray = []
-	for child: LessonContainer in children:
-		if child.lesson_id >= 0 and child.get_gp_count() == 0 and chapters_by_lesson.has(child.lesson_id):
+	var children: Array[LessonContainer] = []
+	for child: LessonContainer in all_children:
+		if child.get_gp_count() > 0:
+			children.append(child)
+		elif child.lesson_id >= 0 and chapters_by_lesson.has(child.lesson_id):
 			stranded.append(str(child.number))
 	if not stranded.is_empty():
-		_show_refusal("Lessons %s have booklet chapters but no GP left. Give them GPs, or move or delete their chapters in Booklet Chapters first." % ", ".join(stranded))
+		_show_refusal("Lessons %s have booklet chapters but no GP. Give them GPs, or move or delete their chapters in Booklet Chapters first." % ", ".join(stranded))
+		return
+	var booklet_problem: String = _booklet_order_problem(children)
+	if not booklet_problem.is_empty():
+		_show_refusal("Saving would put the booklets out of order: %s. Renumber the booklets in Booklet Chapters first, or move the lessons differently." % booklet_problem)
 		return
 
 	Database.db.query("DELETE FROM GPsInLessons")
@@ -137,6 +146,31 @@ func _on_save_button_pressed() -> void:
 
 	# A lesson that still has chapters is not deleted (ON DELETE RESTRICT).
 	Database.db.query_with_bindings("DELETE FROM Lessons WHERE LessonNb > ? AND ID NOT IN (SELECT LessonID FROM BookletChapters)", [children.size()])
+	get_tree().reload_current_scene()
+
+
+## Where the booklet numbers would stop running 1, 2, 3... along the chapters
+## once the lessons sit in this order (SCHEMA.md rule 8); empty when they would not.
+func _booklet_order_problem(children: Array[LessonContainer]) -> String:
+	var new_numbers: Dictionary[int, int] = {}
+	for index: int in range(children.size()):
+		if children[index].lesson_id >= 0:
+			new_numbers[children[index].lesson_id] = index + 1
+	Database.db.query("SELECT LessonID, Position, Booklet FROM BookletChapters")
+	var chapters: Array = Database.db.query_result.duplicate()
+	chapters.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		var lesson_a: int = new_numbers.get(int(a.LessonID), 0)
+		var lesson_b: int = new_numbers.get(int(b.LessonID), 0)
+		if lesson_a != lesson_b:
+			return lesson_a < lesson_b
+		return int(a.Position) < int(b.Position))
+	var previous: int = 0
+	for chapter: Dictionary in chapters:
+		var booklet: int = int(chapter.Booklet)
+		if (booklet != previous and booklet != previous + 1) or (previous == 0 and booklet != 1):
+			return "lesson %d would hold a chapter of booklet %d right after booklet %d" % [new_numbers.get(int(chapter.LessonID), 0), booklet, previous]
+		previous = booklet
+	return ""
 
 
 func _chapter_ids_by_lesson() -> Dictionary[int, Array]:

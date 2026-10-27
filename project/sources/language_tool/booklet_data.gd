@@ -16,18 +16,19 @@ enum Part { SYLLABLES = 1, WORDS = 2, WRITING = 3, TABLES = 4, FLUENCY = 5 }
 enum Break { SAME_LINE = 0, NEW_LINE = 1, NEW_PARAGRAPH = 2 }
 
 ## The settings a chapter can override, in the order the screen shows them:
-## column -> [label, lowest, highest (-1 for none), is_real].
+## column -> [label, lowest, highest, is_real]. The ranges are the validator's
+## (Kalulu-Languages SCHEMA.md rule 8).
 const SETTINGS: Dictionary[String, Array] = {
-	"SyllableCount": ["Syllables printed", 0, -1, false],
-	"SyllableColumns": ["Syllable columns", 1, -1, false],
-	"WordCount": ["Words chosen automatically", 0, -1, false],
-	"WordColumns": ["Word columns", 1, -1, false],
+	"SyllableCount": ["Syllables printed", 0, 999, false],
+	"SyllableColumns": ["Syllable columns", 1, 10, false],
+	"WordCount": ["Words chosen automatically", 0, 999, false],
+	"WordColumns": ["Word columns", 1, 10, false],
 	"UppercaseProportion": ["Share in capitals (0-1)", 0, 1, true],
 	"SentenceFont": ["Sentence font", 0, 2, false],
 	"SentenceFirstFont": ["First paragraph's font", 1, 2, false],
-	"SentencePages": ["Sentence pages (0 = all)", 0, -1, false],
-	"WritingModels": ["Writing: black copies", 0, -1, false],
-	"WritingTracings": ["Writing: grey copies to trace", 0, -1, false],
+	"SentencePages": ["Sentence pages (0 = all)", 0, 99, false],
+	"WritingModels": ["Writing: black copies", 0, 10, false],
+	"WritingTracings": ["Writing: grey copies to trace", 0, 10, false],
 }
 const SENTENCE_FONTS: PackedStringArray = ["Alternating", "Script only", "Cursive only"]
 const FIRST_FONTS: PackedStringArray = ["", "Script", "Cursive"]
@@ -381,7 +382,8 @@ func value_of(chapter: Chapter, column: String) -> float:
 
 ## A chapter's sentences as the screen edits them: one line per printed line,
 ## " | " between sentences sharing a line, an empty line between paragraphs. A
-## line break inside a sentence (SCHEMA.md allows one) is written LINE_BREAK.
+## line break inside a sentence (SCHEMA.md allows one) is written LINE_BREAK,
+## and a "|" inside one "\|".
 func sentences_text(chapter: Chapter) -> String:
 	var text: String = ""
 	for index: int in range(chapter.sentences.size()):
@@ -394,7 +396,7 @@ func sentences_text(chapter: Chapter) -> String:
 					text += "\n"
 				_:
 					text += "\n\n"
-		text += (sentences[item.id].text as String).replace("\n", LINE_BREAK) if sentences.has(item.id) else "?"
+		text += (sentences[item.id].text as String).replace("|", "\\|").replace("\n", LINE_BREAK) if sentences.has(item.id) else "?"
 	return text
 
 
@@ -408,10 +410,11 @@ func parse_sentences(text: String) -> Dictionary:
 		if line.strip_edges().is_empty():
 			brk = Break.NEW_PARAGRAPH
 			continue
-		for piece: String in line.split("|"):
+		# Split at every "|" not written "\|", which belongs to a sentence.
+		for piece: String in line.replace("\\|", "\u0001").split("|"):
 			if piece.strip_edges().is_empty():
 				continue
-			var sentence_text: String = piece.replace(LINE_BREAK, "\n")
+			var sentence_text: String = piece.replace("\u0001", "|").replace(LINE_BREAK, "\n")
 			var sentence_id: int = find_sentence(sentence_text)
 			if sentence_id < 0:
 				missing.append(sentence_text.strip_edges())
@@ -426,8 +429,9 @@ func parse_sentences(text: String) -> Dictionary:
 #region Entries as text
 
 ## A part's entries, one per line; a table row as "left | right", a header row
-## starting with "*". A table cell that itself starts with "*" is written "\\*";
-## other parts have no header rows, so their entries are written as they are.
+## starting with "*". A table cell that itself starts with "*" or "\" gets a
+## "\" in front; other parts have no header rows, so their entries are written
+## as they are.
 static func entries_text(entries: Array, part: int) -> String:
 	var lines: PackedStringArray = []
 	for entry: Dictionary in entries:
@@ -436,7 +440,7 @@ static func entries_text(entries: Array, part: int) -> String:
 			line += " | " + str(entry.text2)
 		if entry.header:
 			line = "* " + line
-		elif part == Part.TABLES and line.begins_with("*"):
+		elif part == Part.TABLES and (line.begins_with("*") or line.begins_with("\\")):
 			line = "\\" + line
 		lines.append(line)
 	return "\n".join(lines)
@@ -449,8 +453,8 @@ static func parse_entries(text: String, part: int) -> Array[Dictionary]:
 		if stripped.is_empty():
 			continue
 		var header: bool = false
-		if part == Part.TABLES and stripped.begins_with("\\*"):
-			stripped = stripped.trim_prefix("\\")
+		if part == Part.TABLES and stripped.begins_with("\\"):
+			stripped = stripped.substr(1)
 		elif part == Part.TABLES and stripped.begins_with("*"):
 			header = true
 			stripped = stripped.trim_prefix("*").strip_edges()

@@ -169,8 +169,8 @@ func _clear_editor() -> void:
 func _spin_box(value: float, lowest: float, highest: float, real: bool, on_change: Callable) -> SpinBox:
 	var spin_box: SpinBox = SpinBox.new()
 	spin_box.min_value = lowest
-	spin_box.max_value = highest if highest >= 0 else 999
-	spin_box.step = 0.05 if real else 1.0
+	spin_box.max_value = highest
+	spin_box.step = 0.01 if real else 1.0
 	spin_box.value = value
 	spin_box.custom_minimum_size.x = 260
 	spin_box.get_line_edit().add_theme_font_size_override("font_size", TEXT_SIZE)

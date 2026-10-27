@@ -85,10 +85,10 @@ func _on_list_title_import_path_selected(path: String, match_to_file: bool) -> v
 		else:
 			not_found_one = true
 	
-	# delete elements that are not in file -- except the sentences the booklets
-	# print, which a sentence file need not list
+	# delete elements that are not in file -- except booklet-only sentences and
+	# those a chapter prints, which a sentence file need not list
 	if match_to_file:
-		var query: String = "Select * FROM Sentences WHERE ID NOT IN (SELECT SentenceID FROM BookletSentences)"
+		var query: String = "Select * FROM Sentences WHERE BookletOnly = 0 AND ID NOT IN (SELECT SentenceID FROM BookletSentences)"
 		Database.db.query(query)
 		var result: Array[Dictionary] = Database.db.query_result
 		for element: Dictionary in result:

@@ -132,6 +132,10 @@ func _on_save_path_selected(file_path: String) -> void:
 	if file_path.get_file() != PackFolder.DATABASE_FILE_NAME:
 		error_label.text = "Save the pack as %s, not %s." % [PackFolder.DATABASE_FILE_NAME, file_path.get_file()]
 		return
+	var refusals: PackedStringArray = _pack_refusals()
+	if not refusals.is_empty():
+		error_label.text = "Not saved, Kalulu-Languages would refuse it: " + "; ".join(refusals)
+		return
 	_write_generated_files()
 	var destination: String = file_path.get_base_dir()
 	# Closed for the copy, so the language.db that leaves is complete; Windows
@@ -145,6 +149,24 @@ func _on_save_path_selected(file_path: String) -> void:
 	save_file.pack_folders[Database.language] = destination
 	save_file.save()
 	error_label.text = "%s saved to %s." % [Database.language, destination]
+
+
+## What the Kalulu-Languages validator would reject in the booklet data, which
+## other screens can leave behind (a lesson moved, a word ticked booklet-only):
+## booklets not numbered 1, 2, 3... along the chapters (rule 8), a game sentence
+## holding a booklet-only word (rule 7).
+func _pack_refusals() -> PackedStringArray:
+	var data: BookletData = BookletData.new()
+	data.load_from_database()
+	var refusals: PackedStringArray = data.save_errors()
+	Database.db.query("SELECT COUNT(DISTINCT Sentences.ID) AS Count FROM Sentences
+		INNER JOIN WordsInSentences ON WordsInSentences.SentenceID = Sentences.ID
+		INNER JOIN Words ON Words.ID = WordsInSentences.WordID
+		WHERE Sentences.BookletOnly = 0 AND Words.BookletOnly = 1")
+	var count: int = int(Database.db.query_result[0].Count) if not Database.db.query_result.is_empty() else 0
+	if count > 0:
+		refusals.append("%d game sentence(s) hold a booklet-only word: save the Sentence List to mark them" % count)
+	return refusals
 
 
 ## The files a saved pack carries besides its database and media: version.txt,
@@ -700,21 +722,21 @@ func _create_gp_csv() -> void:
 
 func _create_words_csv() -> void:
 	var gp_list_file: FileAccess = FileAccess.open(BASE_PATH.path_join(Database.language).path_join("words_list.csv"), FileAccess.WRITE)
-	gp_list_file.store_csv_line(["ORTHO", "GPMATCH", "LESSON", "READING", "WRITING"])
-	var query: String = "SELECT Words.ID as WordId, Word, group_concat(Grapheme, ' ') as Graphemes, group_concat(Phoneme, ' ') as Phonemes, group_concat(GPs.ID, ' ') as GPIDs, Words.Exception, Reading, Writing 
+	gp_list_file.store_csv_line(["ORTHO", "GPMATCH", "LESSON", "READING", "WRITING", "BOOKLET_ONLY"])
+	var query: String = "SELECT Words.ID as WordId, Word, group_concat(Grapheme, ' ') as Graphemes, group_concat(Phoneme, ' ') as Phonemes, group_concat(GPs.ID, ' ') as GPIDs, Words.Exception, Reading, Writing, BookletOnly 
 			FROM Words 
 			INNER JOIN ( SELECT * FROM GPsInWords ORDER BY GPsInWords.Position ) GPsInWords ON Words.ID = GPsInWords.WordID 
 			INNER JOIN GPs ON GPs.ID = GPsInWords.GPID
 			GROUP BY Words.ID
 			UNION ALL
-			SELECT ID, Word, '', '', '', Exception, Reading, Writing FROM Words WHERE ID NOT IN ( SELECT WordID FROM GPsInWords )"
+			SELECT ID, Word, '', '', '', Exception, Reading, Writing, BookletOnly FROM Words WHERE ID NOT IN ( SELECT WordID FROM GPsInWords )"
 	Database.db.query(query)
 	var result: Array[Dictionary] = Database.db.query_result
 	for element: Dictionary in result:
 		# An entry with no decomposition is written too, as "()" in lesson -1, so the
 		# CSV lists everything the database holds.
 		if (element.GPIDs as String).is_empty():
-			gp_list_file.store_csv_line([element["Word"], "()", -1, element.Reading, element.Writing])
+			gp_list_file.store_csv_line([element["Word"], "()", -1, element.Reading, element.Writing, element.BookletOnly])
 			continue
 		var gpmatch: String = "("
 		var graphemes: PackedStringArray = (element.Graphemes as String).split(" ")
@@ -730,26 +752,26 @@ func _create_words_csv() -> void:
 				lesson = -1
 				break
 			lesson = maxi(lesson, gp_id_lesson)
-		gp_list_file.store_csv_line([element.Word, gpmatch, lesson, element.Reading, element.Writing])
+		gp_list_file.store_csv_line([element.Word, gpmatch, lesson, element.Reading, element.Writing, element.BookletOnly])
 
 
 func _create_syllable_csv() -> void:
 	var gp_list_file: FileAccess = FileAccess.open(BASE_PATH.path_join(Database.language).path_join("syllables_list.csv"), FileAccess.WRITE)
-	gp_list_file.store_csv_line(["ORTHO", "GPMATCH", "LESSON", "READING", "WRITING"])
-	var query: String = "SELECT Syllables.ID as SyllableId, Syllable, group_concat(Grapheme, ' ') as Graphemes, group_concat(Phoneme, ' ') as Phonemes, group_concat(GPs.ID, ' ') as GPIDs, Syllables.Exception, Reading, Writing 
+	gp_list_file.store_csv_line(["ORTHO", "GPMATCH", "LESSON", "READING", "WRITING", "BOOKLET_ONLY"])
+	var query: String = "SELECT Syllables.ID as SyllableId, Syllable, group_concat(Grapheme, ' ') as Graphemes, group_concat(Phoneme, ' ') as Phonemes, group_concat(GPs.ID, ' ') as GPIDs, Syllables.Exception, Reading, Writing, BookletOnly 
 			FROM Syllables 
 			INNER JOIN ( SELECT * FROM GPsInSyllables ORDER BY GPsInSyllables.Position ) GPsInSyllables ON Syllables.ID = GPsInSyllables.SyllableID 
 			INNER JOIN GPs ON GPs.ID = GPsInSyllables.GPID
 			GROUP BY Syllables.ID
 			UNION ALL
-			SELECT ID, Syllable, '', '', '', Exception, Reading, Writing FROM Syllables WHERE ID NOT IN ( SELECT SyllableID FROM GPsInSyllables )"
+			SELECT ID, Syllable, '', '', '', Exception, Reading, Writing, BookletOnly FROM Syllables WHERE ID NOT IN ( SELECT SyllableID FROM GPsInSyllables )"
 	Database.db.query(query)
 	var result: Array[Dictionary] = Database.db.query_result
 	for element: Dictionary in result:
 		# An entry with no decomposition is written too, as "()" in lesson -1, so the
 		# CSV lists everything the database holds.
 		if (element.GPIDs as String).is_empty():
-			gp_list_file.store_csv_line([element["Syllable"], "()", -1, element.Reading, element.Writing])
+			gp_list_file.store_csv_line([element["Syllable"], "()", -1, element.Reading, element.Writing, element.BookletOnly])
 			continue
 		var gpmatch: String = "("
 		var graphemes: PackedStringArray = (element.Graphemes as String).split(" ")
@@ -765,25 +787,25 @@ func _create_syllable_csv() -> void:
 				lesson = -1
 				break
 			lesson = maxi(lesson, gp_id_lesson)
-		gp_list_file.store_csv_line([element.Syllable, gpmatch, lesson, element.Reading, element.Writing])
+		gp_list_file.store_csv_line([element.Syllable, gpmatch, lesson, element.Reading, element.Writing, element.BookletOnly])
 
 
 func _create_sentence_csv() -> void:
 	var gp_list_file: FileAccess = FileAccess.open(BASE_PATH.path_join(Database.language).path_join("sentences_list.csv"), FileAccess.WRITE)
-	gp_list_file.store_csv_line(["Sentence", "Lesson"])
-	var query: String = "SELECT Sentences.ID as SentenceId, Sentence, group_concat(Word, ' ') as Words, group_concat(Words.ID, ' ') as WordIDs, Sentences.Exception 
+	gp_list_file.store_csv_line(["Sentence", "Lesson", "BookletOnly"])
+	var query: String = "SELECT Sentences.ID as SentenceId, Sentence, group_concat(Word, ' ') as Words, group_concat(Words.ID, ' ') as WordIDs, Sentences.Exception, Sentences.BookletOnly 
 			FROM Sentences 
 			INNER JOIN ( SELECT * FROM WordsInSentences ORDER BY WordsInSentences.Position ) WordsInSentences ON Sentences.ID = WordsInSentences.SentenceID 
 			INNER JOIN Words ON Words.ID = WordsInSentences.WordID
 			GROUP BY Sentences.ID
 			UNION ALL
-			SELECT ID, Sentence, '', '', Exception FROM Sentences WHERE ID NOT IN ( SELECT SentenceID FROM WordsInSentences )"
+			SELECT ID, Sentence, '', '', Exception, BookletOnly FROM Sentences WHERE ID NOT IN ( SELECT SentenceID FROM WordsInSentences )"
 	Database.db.query(query)
 	var result: Array[Dictionary] = Database.db.query_result
 	for element: Dictionary in result:
 		var lesson: int = -1
 		if (element.WordIDs as String).is_empty():
-			gp_list_file.store_csv_line([element.Sentence, lesson])
+			gp_list_file.store_csv_line([element.Sentence, lesson, element.BookletOnly])
 			continue
 		for word_id: String in (element.WordIDs as String).split(' '):
 			var ind: int = Database.get_min_lesson_for_word_id(int(word_id))
@@ -791,7 +813,7 @@ func _create_sentence_csv() -> void:
 				lesson = -1
 				break
 			lesson = maxi(lesson, ind)
-		gp_list_file.store_csv_line([element.Sentence, lesson])
+		gp_list_file.store_csv_line([element.Sentence, lesson, element.BookletOnly])
 
 
 func _on_open_folder_button_pressed() -> void:
