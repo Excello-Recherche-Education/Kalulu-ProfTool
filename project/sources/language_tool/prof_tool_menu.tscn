@@ -169,16 +169,6 @@ theme_override_font_sizes/font_size = 100
 text = "Save
 "
 
-[node name="CreateBookButton" type="Button" parent="." unique_id=1638670196]
-layout_mode = 0
-offset_left = 32.0
-offset_top = 1304.0
-offset_right = 692.0
-offset_bottom = 1449.0
-theme_override_font_sizes/font_size = 100
-text = "Create Book
-"
-
 [node name="CheckIntegrityButton" type="Button" parent="." unique_id=1824370913]
 layout_mode = 0
 offset_left = 1035.33
@@ -340,7 +330,6 @@ theme_override_font_sizes/font_size = 60
 [connection signal="pressed" from="CenterContainer/TabContainer/GameData/SpeechesButton" to="." method="_on_speeches_button_pressed"]
 [connection signal="pressed" from="CenterContainer/TabContainer/Booklets/BookletsButton" to="." method="_on_booklets_button_pressed"]
 [connection signal="pressed" from="ExportButton" to="." method="_on_export_button_pressed"]
-[connection signal="pressed" from="CreateBookButton" to="." method="create_book"]
 [connection signal="pressed" from="CheckIntegrityButton" to="." method="_check_db_integrity"]
 [connection signal="pressed" from="OpenFolderButton" to="." method="_on_open_folder_button_pressed"]
 [connection signal="pressed" from="VBoxContainer/ImportLanguageButton" to="." method="_on_import_language_button_pressed"]
