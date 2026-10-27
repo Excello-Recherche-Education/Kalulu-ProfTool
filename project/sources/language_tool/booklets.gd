@@ -35,6 +35,11 @@ var _problems_label: Label
 var _count_warnings: Dictionary[int, Label] = {}
 var _repeat_infos: Dictionary[int, Label] = {}
 var _problems_timer: Timer
+var _font_dialog: FileDialog
+## The lists choosing each role's font, whose items are the fonts' names.
+var _font_options: Array[OptionButton] = []
+## Font file path -> the font loaded from it for a preview, null when it cannot be.
+var _loaded_fonts: Dictionary[String, FontFile] = {}
 
 
 func _ready() -> void:
@@ -146,6 +151,12 @@ func _label(text: String, size: int = TEXT_SIZE, wrapped: bool = true) -> Label:
 	if wrapped:
 		label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	label.add_theme_font_size_override("font_size", size)
+	return label
+
+
+func _warning_label(text: String) -> Label:
+	var label: Label = _label(text)
+	label.add_theme_color_override("font_color", WARNING_COLOR)
 	return label
 
 
@@ -295,14 +306,17 @@ func _show_settings() -> void:
 	_clear_editor()
 	_editor.add_child(_label("Language settings", 60))
 	_editor.add_child(_label("Every chapter uses these unless it sets its own."))
+	# A short box and a wrapped label: a CheckBox's text never wraps, and a long
+	# one widened the whole form past the screen, Save included.
 	var cursive: CheckBox = CheckBox.new()
-	cursive.text = "Written in cursive too (titles, sentences, writing pages). Unticked: everything in script, and the sentence fonts below are ignored"
+	cursive.text = "Written in cursive too"
 	cursive.add_theme_font_size_override("font_size", TEXT_SIZE)
 	cursive.button_pressed = data.settings.get("Cursive", 1.0) != 0.0
 	cursive.toggled.connect(func(pressed: bool) -> void:
 		data.settings["Cursive"] = float(pressed)
 		_changed())
 	_editor.add_child(cursive)
+	_editor.add_child(_label("Ticked: titles, sentences and writing pages are also printed in cursive. Unticked: everything is printed in script, and the sentence fonts below are ignored."))
 	var grid: GridContainer = GridContainer.new()
 	grid.columns = 2
 	grid.add_theme_constant_override("h_separation", 30)
@@ -312,6 +326,7 @@ func _show_settings() -> void:
 		grid.add_child(_setting_control(column, data.settings.get(column, 0.0), func(value: float) -> void:
 			data.settings[column] = value
 			_changed()))
+	_show_fonts()
 
 
 func _show_chapter(chapter: BookletData.Chapter) -> void:
@@ -517,6 +532,190 @@ func _show_problems() -> void:
 	for part: int in _count_warnings:
 		_show_count_warning(_chapter, part)
 	_problems_label.text = "\n".join(found) if not found.is_empty() else "Nothing to check."
+
+#endregion
+
+#region Fonts
+
+## The Fonts part of the language settings: the fonts added to the language, and
+## which of them replaces each default one, each with a preview of the pack's
+## text in it and the characters it lacks.
+func _show_fonts() -> void:
+	_heading("Fonts")
+	_editor.add_child(_label("The booklets print with Mulish (script) and Marelle (cursive). Another font can replace any of the four below, everywhere in this language's booklets: put it in Kalulu-Languages' fonts folder first, with its license in fonts/LICENSE.md, then add it here and choose what it replaces."))
+	if _fonts_folder().is_empty():
+		_editor.add_child(_warning_label("No preview: open this language from its language.db in a Kalulu-Languages checkout, and the Prof Tool finds the fonts folder beside it."))
+
+	_font_options.clear()
+	for font: BookletData.BookletFont in data.fonts:
+		var row: HBoxContainer = HBoxContainer.new()
+		row.add_theme_constant_override("separation", 20)
+		_editor.add_child(row)
+		var font_name: LineEdit = LineEdit.new()
+		font_name.text = font.name
+		font_name.custom_minimum_size.x = 600
+		font_name.add_theme_font_size_override("font_size", TEXT_SIZE)
+		font_name.text_changed.connect(func(text: String) -> void:
+			font.name = text.strip_edges()
+			for option: OptionButton in _font_options:
+				option.set_item_text(option.get_item_index(data.fonts.find(font) + 1), font.name)
+			_changed())
+		row.add_child(font_name)
+		var file: Label = _label("fonts/" + font.file, TEXT_SIZE, false)
+		file.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		file.clip_text = true
+		row.add_child(file)
+		row.add_child(_button("Remove", func() -> void:
+			data.remove_font(font)
+			_changed()
+			_show_settings()))
+	_editor.add_child(_button("Add custom font...", _on_add_font_pressed))
+
+	for column: String in BookletData.FONT_ROLES:
+		var role: Array = BookletData.FONT_ROLES[column]
+		var row: HBoxContainer = HBoxContainer.new()
+		row.add_theme_constant_override("separation", 30)
+		_editor.add_child(row)
+		var role_label: Label = _label(role[0], TEXT_SIZE, false)
+		role_label.custom_minimum_size.x = 300
+		row.add_child(role_label)
+		var option: OptionButton = _option_button()
+		option.add_item("Default: " + str(role[1]), 0)
+		for index: int in range(data.fonts.size()):
+			option.add_item(data.fonts[index].name, index + 1)
+		var chosen: BookletData.BookletFont = data.font_choices.get(column, null)
+		option.select(0 if chosen == null else data.fonts.find(chosen) + 1)
+		row.add_child(option)
+		_font_options.append(option)
+		var preview: Label = _label("")
+		var missing: Label = _warning_label("")
+		_editor.add_child(preview)
+		_editor.add_child(missing)
+		_show_font_preview(column, preview, missing)
+		option.item_selected.connect(func(index: int) -> void:
+			var id: int = option.get_item_id(index)
+			if id == 0:
+				data.font_choices.erase(column)
+			else:
+				data.font_choices[column] = data.fonts[id - 1]
+			_changed()
+			_show_font_preview(column, preview, missing))
+
+
+## Shows the pack's text in the font a role prints with, and the characters of
+## the pack it lacks, which the booklets could not print.
+func _show_font_preview(column: String, preview: Label, missing: Label) -> void:
+	var chosen: BookletData.BookletFont = data.font_choices.get(column, null)
+	var file: String = BookletData.FONT_ROLES[column][2] if chosen == null else chosen.file
+	missing.text = ""
+	var folder: String = _fonts_folder()
+	if folder.is_empty():
+		preview.visible = false
+		return
+	var font: FontFile = _load_font(folder.path_join(file))
+	preview.visible = true
+	if font == null:
+		preview.remove_theme_font_override("font")
+		preview.text = "fonts/%s cannot be read here: it is not in %s, or it is not a font." % [file, folder]
+		preview.add_theme_color_override("font_color", WARNING_COLOR)
+		return
+	preview.remove_theme_color_override("font_color")
+	preview.add_theme_font_override("font", font)
+	preview.add_theme_font_size_override("font_size", HEADING_SIZE)
+	var characters: PackedStringArray = data.pack_characters()
+	# Spaced, so that the line wraps: unbroken, it would widen the whole form.
+	preview.text = _font_sample() + "\n" + " ".join(characters)
+	var lacking: PackedStringArray = []
+	for character: String in characters:
+		if _lacks(font, character):
+			lacking.append(character)
+	if not lacking.is_empty():
+		missing.text = "This font has no %s: the booklets cannot print %s." % [
+				" ".join(lacking), "it" if lacking.size() == 1 else "them"]
+	if column == "CursiveFontID" and data.settings.get("Cursive", 1.0) == 0.0:
+		missing.text = ("%s\n" % missing.text if not missing.text.is_empty() else "") + "Not printed: this language is written in script only (see the box above)."
+
+
+## A sentence of the pack, the first one the booklets could start with.
+func _font_sample() -> String:
+	var first: int = -1
+	for sentence_id: int in data.sentences:
+		if first < 0 or sentence_id < first:
+			first = sentence_id
+	return str(data.sentences[first].text).replace("\n", " ") if first >= 0 else ""
+
+
+## Whether a font cannot print a character. Shaped rather than looked up: a
+## shaping engine, the generator's included, prints a letter the font has no
+## glyph for from its parts when it has those ("á" as "a" and a combining acute,
+## which is how Marelle prints Spanish), so only a glyph no font gives is lacking.
+func _lacks(font: FontFile, character: String) -> bool:
+	var text_server: TextServer = TextServerManager.get_primary_interface()
+	var shaped: RID = text_server.create_shaped_text()
+	text_server.shaped_text_add_string(shaped, character, font.get_rids(), TEXT_SIZE)
+	var lacking: bool = false
+	for glyph: Dictionary in text_server.shaped_text_get_glyphs(shaped):
+		if not (glyph.font_rid as RID).is_valid():
+			lacking = true
+	text_server.free_rid(shaped)
+	return lacking
+
+
+## A font for the previews, without the system's fonts behind it: a character it
+## lacks shows as a box, as it would be missing on paper.
+func _load_font(path: String) -> FontFile:
+	if not _loaded_fonts.has(path):
+		var font: FontFile = null
+		if FileAccess.file_exists(path):
+			font = FontFile.new()
+			if font.load_dynamic_font(path) != OK:
+				font = null
+			else:
+				font.allow_system_fallback = false
+		_loaded_fonts[path] = font
+	return _loaded_fonts[path]
+
+
+## The fonts folder of the Kalulu-Languages checkout this language was opened
+## from, or "" when it was not opened from one.
+func _fonts_folder() -> String:
+	var pack_folder: String = ProfToolSave.load_or_create().pack_folders.get(Database.language, "")
+	if pack_folder.is_empty():
+		return ""
+	var checkout: String = pack_folder.get_base_dir()
+	if not FileAccess.file_exists(checkout.path_join("SCHEMA.md")) or not DirAccess.dir_exists_absolute(checkout.path_join("fonts")):
+		return ""
+	return checkout.path_join("fonts")
+
+
+func _on_add_font_pressed() -> void:
+	if _font_dialog == null:
+		_font_dialog = FileDialog.new()
+		_font_dialog.title = "Add a custom font"
+		_font_dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
+		_font_dialog.access = FileDialog.ACCESS_FILESYSTEM
+		_font_dialog.filters = PackedStringArray(["*.ttf, *.otf ; TrueType or OpenType fonts"])
+		_font_dialog.size = Vector2i(1500, 1000)
+		_font_dialog.file_selected.connect(_on_font_file_selected)
+		add_child(_font_dialog)
+	var folder: String = _fonts_folder()
+	if not folder.is_empty():
+		_font_dialog.current_dir = folder
+	_font_dialog.popup_centered()
+
+
+func _on_font_file_selected(path: String) -> void:
+	var font: FontFile = FontFile.new()
+	if font.load_dynamic_font(path) != OK:
+		_status.text = "Not added: %s is not a font this Prof Tool can read." % path.get_file()
+		return
+	var display_name: String = ("%s %s" % [font.get_font_name(), font.get_font_style_name()]).strip_edges()
+	var result: Dictionary = data.add_font(path, display_name)
+	if result.font == null:
+		_status.text = "Not added: " + str(result.error)
+		return
+	_changed()
+	_show_settings()
 
 #endregion
 
