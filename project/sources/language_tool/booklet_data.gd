@@ -33,6 +33,19 @@ const SETTINGS: Dictionary[String, Array] = {
 const SENTENCE_FONTS: PackedStringArray = ["Alternating", "Script only", "Cursive only"]
 const FIRST_FONTS: PackedStringArray = ["", "Script", "Cursive"]
 
+## The fonts a language can replace, in the order the screen shows them:
+## BookletSettings column -> [label, the default font's name, its file in
+## Kalulu-Languages' fonts/]. The generator prints with these when the column is
+## NULL (Kalulu-Booklets fonts.py).
+const FONT_ROLES: Dictionary[String, Array] = {
+	"ScriptFontID": ["Script", "Mulish (Kalulu), regular", "mulish/kalulu_mulish_regular.otf"],
+	"ScriptBoldFontID": ["Script bold", "Mulish (Kalulu), bold", "mulish/kalulu_mulish_bold.otf"],
+	"ScriptBlackFontID": ["Script black", "Mulish (Kalulu), black", "mulish/kalulu_mulish_black.otf"],
+	"CursiveFontID": ["Cursive", "Marelle", "marelle/Marelle-Regular.ttf"],
+}
+## What a font file must end with to be printed: TrueType or OpenType.
+const FONT_EXTENSIONS: PackedStringArray = ["ttf", "otf"]
+
 ## How the Booklets screen shows a line break that is part of a sentence.
 const LINE_BREAK: String = "⏎"
 ## Characters a booklet text is cut into words at, besides spaces: the Prof Tool's
@@ -68,8 +81,19 @@ class Chapter:
 			entries[part] = []
 		return entries[part]
 
+## A font the booklets may print with instead of a default one: a file of
+## Kalulu-Languages' fonts/ folder, named by its path there.
+class BookletFont:
+	var id: int = -1
+	var name: String = ""
+	var file: String = ""
+
 ## BookletSettings: column -> value, Cursive included.
 var settings: Dictionary[String, float] = {}
+## BookletFonts, in the order they were added.
+var fonts: Array[BookletFont] = []
+## FONT_ROLES column -> the font replacing that default one; absent keeps it.
+var font_choices: Dictionary[String, BookletFont] = {}
 var chapters: Array[Chapter] = []
 
 ## Lesson ID -> LessonNb, and LessonNb -> lesson ID.
@@ -105,12 +129,27 @@ func load_from_database() -> void:
 		lesson_ids[int(row.LessonNb)] = int(row.ID)
 	refresh_lists()
 
+	fonts.clear()
+	var fonts_by_id: Dictionary[int, BookletFont] = {}
+	db.query("SELECT ID, Name, File FROM BookletFonts ORDER BY ID")
+	for row: Dictionary in db.query_result:
+		var font: BookletFont = BookletFont.new()
+		font.id = int(row.ID)
+		font.name = str(row.Name)
+		font.file = str(row.File)
+		fonts.append(font)
+		fonts_by_id[font.id] = font
+
 	settings.clear()
+	font_choices.clear()
 	db.query("SELECT * FROM BookletSettings ORDER BY ID LIMIT 1")
 	if not db.query_result.is_empty():
 		var row: Dictionary = db.query_result[0]
 		for column: String in ["Cursive"] + SETTINGS.keys():
 			settings[column] = float(row[column])
+		for column: String in FONT_ROLES:
+			if row[column] != null and fonts_by_id.has(int(row[column])):
+				font_choices[column] = fonts_by_id[int(row[column])]
 
 	chapters.clear()
 	var by_id: Dictionary[int, Chapter] = {}
@@ -451,6 +490,88 @@ static func parse_entries(text: String, part: int) -> Array[Dictionary]:
 
 #endregion
 
+#region Fonts
+
+## A font added from a file: path is where it was picked, which must be inside
+## the fonts/ folder of a Kalulu-Languages checkout, the one the generator loads
+## fonts from. Returns {font, error}: the new font, or why it was not added.
+func add_font(path: String, display_name: String) -> Dictionary:
+	var file: String = font_file_in_fonts(path)
+	if file.is_empty():
+		return {font = null, error = "%s is not inside the fonts folder of a Kalulu-Languages checkout. Put the font there first (with its license in fonts/LICENSE.md), then pick it there." % path}
+	if not path.get_extension().to_lower() in FONT_EXTENSIONS:
+		return {font = null, error = "%s is not a .ttf or .otf font." % path.get_file()}
+	for font: BookletFont in fonts:
+		if font.file == file:
+			return {font = null, error = "fonts/%s is already added, as \"%s\"." % [file, font.name]}
+	var font: BookletFont = BookletFont.new()
+	font.file = file
+	font.name = unique_font_name(display_name if not display_name.strip_edges().is_empty() else path.get_file().get_basename())
+	fonts.append(font)
+	return {font = font, error = ""}
+
+
+## Removes a font; the roles it replaced get their default font back.
+func remove_font(font: BookletFont) -> void:
+	fonts.erase(font)
+	for column: String in font_choices.keys():
+		if font_choices[column] == font:
+			font_choices.erase(column)
+
+
+## The path of a font file inside the fonts/ folder of the Kalulu-Languages
+## checkout it is in ("andika/Andika-Regular.ttf"), or "" when it is in none. A
+## checkout is recognized by its SCHEMA.md beside fonts/.
+static func font_file_in_fonts(path: String) -> String:
+	var parts: PackedStringArray = path.simplify_path().replace("\\", "/").split("/")
+	for index: int in range(parts.size() - 2, -1, -1):
+		if parts[index] != "fonts":
+			continue
+		var checkout: String = "/".join(parts.slice(0, index))
+		if FileAccess.file_exists(checkout.path_join("SCHEMA.md")):
+			return "/".join(parts.slice(index + 1))
+	return ""
+
+
+## name, or name followed by a number when another font already has it.
+func unique_font_name(wanted: String, ignored: BookletFont = null) -> String:
+	var base: String = wanted.strip_edges()
+	var candidate: String = base
+	var number: int = 2
+	while _font_named(candidate, ignored) != null:
+		candidate = "%s %d" % [base, number]
+		number += 1
+	return candidate
+
+
+func _font_named(font_name: String, ignored: BookletFont) -> BookletFont:
+	for font: BookletFont in fonts:
+		if font != ignored and font.name == font_name:
+			return font
+	return null
+
+
+## Every character the pack's syllables, words, sentences and chapter titles
+## use, once each, in the order first met: what a font must have to print them.
+func pack_characters() -> PackedStringArray:
+	var seen: Dictionary[String, bool] = {}
+	var texts: Array[String] = []
+	for item: Dictionary in syllable_list + word_list:
+		texts.append(str(item.text))
+	for sentence: Dictionary in sentences.values():
+		texts.append(str(sentence.text))
+	for chapter: Chapter in chapters:
+		texts.append(chapter.title)
+	for text: String in texts:
+		for index: int in range(text.length()):
+			var character: String = text[index]
+			if character.strip_edges().is_empty() or seen.has(character):
+				continue
+			seen[character] = true
+	return PackedStringArray(seen.keys())
+
+#endregion
+
 #region What a chapter prints that its lesson cannot read
 
 ## What would make the booklet tables unreadable (SCHEMA.md rule 8), one line
@@ -460,6 +581,13 @@ static func parse_entries(text: String, part: int) -> Array[Dictionary]:
 func save_errors() -> PackedStringArray:
 	sort_chapters()
 	var errors: PackedStringArray = []
+	var names: Dictionary[String, bool] = {}
+	for font: BookletFont in fonts:
+		if font.name.strip_edges().is_empty():
+			errors.append("The font fonts/%s has no name" % font.file)
+		elif names.has(font.name):
+			errors.append("Two fonts are called \"%s\"" % font.name)
+		names[font.name] = true
 	var previous: Chapter = null
 	for chapter: Chapter in chapters:
 		var allowed: Array[int] = [1]
@@ -629,12 +757,18 @@ func save_to_database() -> String:
 	for chapter: Chapter in chapters:
 		if chapter.id < 0:
 			new_chapters.append(chapter)
+	var new_fonts: Array[BookletFont] = []
+	for font: BookletFont in fonts:
+		if font.id < 0:
+			new_fonts.append(font)
 	var error: String = _save_all()
 	if not error.is_empty():
-		# Rolled back, so the IDs the new chapters were given no longer exist and
-		# the next insert may be given them again: they are new chapters still.
+		# Rolled back, so the IDs the new chapters and fonts were given no longer
+		# exist and the next insert may be given them again: they are new still.
 		for chapter: Chapter in new_chapters:
 			chapter.id = -1
+		for font: BookletFont in new_fonts:
+			font.id = -1
 	return error
 
 
@@ -648,7 +782,10 @@ func _save_all() -> String:
 	for column: String in settings_columns:
 		assignments.append('"%s" = ?' % column)
 		values.append(_column_value(column, settings.get(column, 0.0)))
-	steps.append(['UPDATE "BookletSettings" SET %s' % ", ".join(assignments), values])
+	# The font columns come after the fonts are saved, once new ones have an ID.
+	var font_assignments: PackedStringArray = []
+	for column: String in FONT_ROLES:
+		font_assignments.append('"%s" = ?' % column)
 
 	var kept_ids: PackedStringArray = []
 	for chapter: Chapter in chapters:
@@ -658,6 +795,13 @@ func _save_all() -> String:
 
 	if not db.query("BEGIN TRANSACTION"):
 		return db.get_error_message()
+	var font_error: String = _save_fonts()
+	if not font_error.is_empty():
+		return font_error
+	var font_values: Array = []
+	for column: String in FONT_ROLES:
+		font_values.append(font_choices[column].id if font_choices.has(column) and font_choices[column] in fonts else null)
+	steps.push_front(['UPDATE "BookletSettings" SET %s' % ", ".join(assignments + font_assignments), values + font_values])
 	for step: Array in steps:
 		if not db.query_with_bindings(step[0] as String, step[1] as Array):
 			return _rollback("saving the booklet settings")
@@ -667,6 +811,31 @@ func _save_all() -> String:
 			return error
 	if not db.query("COMMIT"):
 		return _rollback("committing")
+	return ""
+
+
+## BookletFonts as listed: removed fonts deleted (ON DELETE SET NULL frees the
+## roles they replaced), kept ones renamed, new ones inserted and given their ID.
+## Kept fonts first take a name and a file no other row can have, so that two
+## swapping names never meet the UNIQUE constraints half-way.
+func _save_fonts() -> String:
+	var db: SQLite = Database.db
+	var kept_ids: PackedStringArray = []
+	for font: BookletFont in fonts:
+		if font.id >= 0:
+			kept_ids.append(str(font.id))
+	if not db.query('DELETE FROM "BookletFonts" WHERE ID NOT IN (%s)' % ", ".join(kept_ids)):
+		return _rollback("removing fonts")
+	if not db.query("UPDATE \"BookletFonts\" SET Name = char(1) || ID, File = char(1) || ID"):
+		return _rollback("renaming fonts")
+	for font: BookletFont in fonts:
+		if font.id >= 0:
+			if not db.query_with_bindings('UPDATE "BookletFonts" SET Name = ?, File = ? WHERE ID = ?', [font.name, font.file, font.id]):
+				return _rollback("saving a font")
+		else:
+			if not db.query_with_bindings('INSERT INTO "BookletFonts" (Name, File) VALUES (?, ?)', [font.name, font.file]):
+				return _rollback("adding a font")
+			font.id = db.last_insert_rowid
 	return ""
 
 
