@@ -18,7 +18,8 @@ func _ready() -> void:
 		description_line.image_preview.hide()
 		description_line.image_upload_button.hide()
 	
-	Database.db.query("SELECT * FROM Syllables WHERE Syllables.Exception=0")
+	# Booklet-only entries are never played, so they get no recording.
+	Database.db.query("SELECT * FROM Syllables WHERE Syllables.Exception=0 AND Syllables.BookletOnly=0")
 	for res: Dictionary in Database.db.query_result:
 		var description_line: ImageAndSoundGPDescription = DESCRIPTION_LINE_SCENE.instantiate()
 		description_line.get_sound_path = Database.get_syllable_sound_path
@@ -32,7 +33,7 @@ func _ready() -> void:
 		description_line.image_preview.hide()
 		description_line.image_upload_button.hide()
 	
-	Database.db.query("SELECT * FROM Words WHERE Words.Exception=0")
+	Database.db.query("SELECT * FROM Words WHERE Words.Exception=0 AND Words.BookletOnly=0")
 	for res: Dictionary in Database.db.query_result:
 		var description_line: ImageAndSoundGPDescription = DESCRIPTION_LINE_SCENE.instantiate()
 		description_line.get_sound_path = Database.get_word_sound_path

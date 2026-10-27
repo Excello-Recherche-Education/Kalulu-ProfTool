@@ -47,6 +47,7 @@ func _ready() -> void:
 		element.exception = elem.Exception
 		element.reading = elem.Reading
 		element.writing = elem.Writing
+		element.booklet_only = elem.BookletOnly
 		element.set_gp_ids_from_string(elem[_element.sub_table_id + "s"] as String)
 		elements_container.add_child(element)
 		element.undo_redo = undo_redo
@@ -71,18 +72,18 @@ func _ready() -> void:
 # JOIN instead: SQLite then plans it differently and group_concat stops following
 # Position, so Save, which compares that string with the list's, deletes the entry.
 func _get_query() -> String:
-	return "SELECT %s.ID as %sId, %s, group_concat(%s, ' ') as %ss, group_concat(%s, ' ') as %ss, group_concat(%s.ID, ' ') as %ss, %s.Exception, %s.Reading, %s.Writing 
+	return "SELECT %s.ID as %sId, %s, group_concat(%s, ' ') as %ss, group_concat(%s, ' ') as %ss, group_concat(%s.ID, ' ') as %ss, %s.Exception, %s.Reading, %s.Writing, %s.BookletOnly 
 			FROM %s 
 			INNER JOIN ( SELECT * FROM %s ORDER BY %s.Position ) %s ON %s.ID = %s.%sID 
 			INNER JOIN %s ON %s.ID = %s.%s
 			GROUP BY %s.ID
 			UNION ALL
-			SELECT ID, %s, '', '', '', Exception, Reading, Writing
+			SELECT ID, %s, '', '', '', Exception, Reading, Writing, BookletOnly
 			FROM %s
 			WHERE ID NOT IN ( SELECT %sID FROM %s )" % [_element.table, _element.table_graph_column,
 				_element.table_graph_column, _element.sub_table_graph_column, _element.sub_table_graph_column,
 				_element.sub_table_phon_column, _element.sub_table_phon_column,
-				_element.sub_table, _element.sub_table_id, _element.table, _element.table, _element.table,
+				_element.sub_table, _element.sub_table_id, _element.table, _element.table, _element.table, _element.table,
 				_element.table,
 				_element.relational_table, _element.relational_table, _element.relational_table, _element.table, _element.relational_table, _element.table_graph_column,
 				_element.sub_table, _element.sub_table, _element.relational_table, _element.sub_table_id,
@@ -183,6 +184,30 @@ func _on_save_button_pressed() -> void:
 		if not found:
 			Database.db.delete_rows(_element.table, "ID=%s" % elem[_element.table_graph_column + "Id"])
 	undo_redo.clear_history()
+	_mark_sentences_of_booklet_only_words()
+
+
+## A game sentence holding a booklet-only word would bring that word back into
+## the game (Kalulu-Languages SCHEMA.md rule 7), so ticking Booklet only on a
+## word, or saving a sentence, makes every such sentence booklet-only too.
+func _mark_sentences_of_booklet_only_words() -> void:
+	var holding: String = "SELECT WordsInSentences.SentenceID FROM WordsInSentences
+		INNER JOIN Words ON Words.ID = WordsInSentences.WordID
+		WHERE Words.BookletOnly = 1"
+	Database.db.query("SELECT ID FROM Sentences WHERE BookletOnly = 0 AND ID IN (%s)" % holding)
+	var marked: Dictionary[int, bool] = {}
+	for row: Dictionary in Database.db.query_result:
+		marked[int(row.ID)] = true
+	if marked.is_empty():
+		return
+	Database.db.query("UPDATE Sentences SET BookletOnly = 1 WHERE BookletOnly = 0 AND ID IN (%s)" % holding)
+	# On the Sentence List, the rows on screen follow, or the next Save would
+	# write 0 back before marking them again.
+	if _element.table == "Sentences":
+		for element: WordListElement in elements_container.get_children():
+			if marked.has(element.id):
+				element.booklet_only = 1
+	error_label.text = "%d sentence(s) holding a booklet-only word are now booklet-only too." % marked.size()
 
 
 func _on_back_button_pressed() -> void:
@@ -266,7 +291,8 @@ func _on_list_title_import_path_selected(path: String, match_to_file: bool) -> v
 	
 	# delete elements that are not in file
 	if match_to_file:
-		var query: String = "Select * FROM Words"
+		# Booklet-only entries are not the file's: a lexicon need not list them.
+		var query: String = "Select * FROM Words WHERE BookletOnly = 0"
 		Database.db.query(query)
 		var result: Array[Dictionary] = Database.db.query_result
 		for element: Dictionary in result:

@@ -21,7 +21,8 @@ func _on_list_title_import_path_selected(path: String, match_to_file: bool) -> v
 	
 	# delete elements that are not in file
 	if match_to_file:
-		var query: String = "Select * FROM Syllables"
+		# Booklet-only entries are not the file's: a lexicon need not list them.
+		var query: String = "Select * FROM Syllables WHERE BookletOnly = 0"
 		Database.db.query(query)
 		var result: Array[Dictionary] = Database.db.query_result
 		for element: Dictionary in result:
