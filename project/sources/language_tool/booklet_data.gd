@@ -485,6 +485,25 @@ static func word_entry_problem(entry: Dictionary) -> String:
 	return "the word \"%s\" is printed as \"%s\", which no longer holds it" % [base, entry.text]
 
 
+## What the Booklets screen says, as information, when a chapter picks the same
+## syllable or word more than once (a word by the one it was picked from): it may
+## be meant, and each pick is printed. "" when every pick is different.
+func repeat_info(chapter: Chapter, part: int) -> String:
+	var counts: Dictionary[String, int] = {}
+	for entry: Dictionary in chapter.get_entries(part):
+		var key: String = str(entry.get("base", ""))
+		if key.is_empty():
+			key = str(entry.text).to_lower()
+		counts[key] = counts.get(key, 0) + 1
+	var repeated: PackedStringArray = []
+	for key: String in counts:
+		if counts[key] > 1:
+			repeated.append("\"%s\" %d times" % [key, counts[key]])
+	if repeated.is_empty():
+		return ""
+	return "Picked more than once: %s. Each pick is printed." % ", ".join(repeated)
+
+
 ## What the Booklets screen says when a chapter's picks are not the count it
 ## prints, or "" when they are, or when nothing is picked.
 func count_warning(chapter: Chapter, part: int) -> String:

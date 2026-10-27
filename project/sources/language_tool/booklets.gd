@@ -30,8 +30,10 @@ var _lesson_picker: OptionButton
 var _editor: VBoxContainer
 var _status: Label
 var _problems_label: Label
-## Part -> the label above its picks that says when they are not the count.
+## Part -> the label above its picks that says when they are not the count,
+## and the one that says when one is picked more than once.
 var _count_warnings: Dictionary[int, Label] = {}
+var _repeat_infos: Dictionary[int, Label] = {}
 var _problems_timer: Timer
 
 
@@ -170,6 +172,7 @@ func _clear_editor() -> void:
 		child.queue_free()
 	_problems_label = null
 	_count_warnings.clear()
+	_repeat_infos.clear()
 
 
 func _spin_box(value: float, lowest: float, highest: float, real: bool, on_change: Callable) -> SpinBox:
@@ -366,7 +369,7 @@ func _show_chapter(chapter: BookletData.Chapter) -> void:
 	_editor.add_child(_label("Picked from the Word List, in order, and printed as the box says: add an article or a capital there (\"la Lune\" for \"lune\"), as long as the word stays. \"Words printed\" works as for syllables."))
 	_add_picker(chapter, BookletData.Part.WORDS)
 	_heading("Sentences")
-	_editor.add_child(_label("Picked from the Sentence List, in order, each after a new paragraph, a new line, or on the same line as the one before (%s is a line break inside a sentence). Alternating: script and cursive take turns, paragraph by paragraph. \"Sentence pages\": -1 prints none, 0 only what fits on the chapter page, 1 or more that many pages more." % BookletData.LINE_BREAK))
+	_editor.add_child(_label("Picked from the Sentence List, in order, each after a new paragraph, a new line, or on the same line as the one before (%s is a line break inside a sentence). Alternating: script and cursive take turns, paragraph by paragraph. \"Sentence pages\": -1 prints none, 0 only what fits on the chapter page, 1 or more that many pages more. Nothing picked: as many sentences as fit are chosen, each whole and a paragraph of its own, from those the lesson can read, the ones holding the chapter's GPs first, booklet-only ones first, then in the pack's order." % BookletData.LINE_BREAK))
 	_add_sentence_picker(chapter)
 	_heading("Penguin tables")
 	_editor.add_child(_label("One row per line, \"left | right\". Start a line with * for a bold row, which begins a new table; \\* for a cell that starts with a star."))
@@ -590,6 +593,9 @@ func _add_picker(chapter: BookletData.Chapter, part: int) -> void:
 	warning.add_theme_color_override("font_color", WARNING_COLOR)
 	_count_warnings[part] = warning
 	_editor.add_child(warning)
+	var info: Label = _label("")
+	_repeat_infos[part] = info
+	_editor.add_child(info)
 	var rows: VBoxContainer = VBoxContainer.new()
 	_editor.add_child(rows)
 	_fill_entry_rows(rows, chapter, part)
@@ -665,13 +671,17 @@ func _move_entry(rows: VBoxContainer, chapter: BookletData.Chapter, part: int, i
 
 
 ## The warning sign above a chapter's syllables or words when the picks are not
-## the count printed; nothing when they are, or when nothing is picked.
+## the count printed, nothing when they are or when nothing is picked; and the
+## information that one is picked more than once.
 func _show_count_warning(chapter: BookletData.Chapter, part: int) -> void:
 	if not _count_warnings.has(part):
 		return
 	var warning: String = data.count_warning(chapter, part)
 	_count_warnings[part].text = "⚠ " + warning if not warning.is_empty() else ""
 	_count_warnings[part].visible = not warning.is_empty()
+	var info: String = data.repeat_info(chapter, part)
+	_repeat_infos[part].text = "ℹ " + info if not info.is_empty() else ""
+	_repeat_infos[part].visible = not info.is_empty()
 
 
 func _add_sentence_picker(chapter: BookletData.Chapter) -> void:
