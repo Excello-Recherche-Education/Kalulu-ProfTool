@@ -47,6 +47,9 @@ func _ready() -> void:
 	data.load_from_database()
 	_fill_chapter_list()
 	_show_settings()
+	if data.made_default_chapters:
+		_changed()
+		_status.text = "This pack had no chapter: here is one per lesson, from its GPs, with the language's settings. Save to keep them."
 
 
 #region Layout

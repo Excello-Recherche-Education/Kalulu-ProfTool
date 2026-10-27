@@ -95,6 +95,9 @@ var fonts: Array[BookletFont] = []
 ## FONT_ROLES column -> the font replacing that default one; absent keeps it.
 var font_choices: Dictionary[String, BookletFont] = {}
 var chapters: Array[Chapter] = []
+## True when the pack had no chapter and load_from_database() made the default
+## ones, which are not in the pack until they are saved.
+var made_default_chapters: bool = false
 
 ## Lesson ID -> LessonNb, and LessonNb -> lesson ID.
 var lesson_numbers: Dictionary[int, int] = {}
@@ -189,6 +192,18 @@ func load_from_database() -> void:
 		if by_id.has(int(row.ChapterID)):
 			by_id[int(row.ChapterID)].stories.append({title = str(row.Title), text = str(row.Text)})
 	sort_chapters()
+	made_default_chapters = chapters.is_empty() and not lesson_ids.is_empty()
+	if made_default_chapters:
+		add_default_chapters()
+
+
+## A pack with no chapter starts with one per lesson, in the lessons' order,
+## each made as Add chapter makes one, every setting the language's: what
+## Kalulu-Booklets prints for such a pack (Kalulu-Languages SCHEMA.md, "The
+## reading booklets").
+func add_default_chapters() -> void:
+	for lesson_nb: int in lesson_ids:
+		add_chapter(lesson_ids[lesson_nb])
 
 
 ## Rereads the GPs, words, syllables and sentences, leaving the chapters as they
