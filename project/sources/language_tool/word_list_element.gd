@@ -35,8 +35,6 @@ var exception: int = 0:
 	set = set_exception
 var reading: int = 0:
 	set = set_reading
-var writing: int = 0:
-	set = set_writing
 ## Printed in the reading booklets only: the game leaves the entry out.
 var booklet_only: int = 0:
 	set = set_booklet_only
@@ -50,9 +48,7 @@ var sub_elements_list: Dictionary = {}
 @onready var exception_checkbox: CheckBox = %ExceptionCheckBox
 @onready var exception_edit_checkbox: CheckBox = %ExceptionEditCheckBox
 @onready var reading_checkbox: CheckBox = %ReadingCheckBox
-@onready var writing_checkbox: CheckBox = %WritingCheckBox
 @onready var reading_edit_checkbox: CheckBox = %ReadingEditCheckBox
-@onready var writing_edit_checkbox: CheckBox = %WritingEditCheckBox
 @onready var booklet_only_checkbox: CheckBox = %BookletOnlyCheckBox
 @onready var booklet_only_edit_checkbox: CheckBox = %BookletOnlyEditCheckBox
 @onready var graphemes_edit_container: HBoxContainer = %GraphemesEditContainer
@@ -74,14 +70,6 @@ func set_reading(p_reading: bool) -> void:
 		reading_checkbox.button_pressed = bool(reading)
 	if reading_edit_checkbox:
 		reading_edit_checkbox.button_pressed = bool(reading)
-
-
-func set_writing(p_writing: bool) -> void:
-	writing = p_writing
-	if writing_checkbox:
-		writing_checkbox.button_pressed = bool(writing)
-	if writing_edit_checkbox:
-		writing_edit_checkbox.button_pressed = bool(writing)
 
 
 func set_booklet_only(p_booklet_only: bool) -> void:
@@ -197,7 +185,6 @@ func _ready() -> void:
 	set_lesson(lesson)
 	set_exception(exception)
 	set_reading(reading)
-	set_writing(writing)
 	set_booklet_only(booklet_only)
 	(%WordEditLabel as Label).text = table_graph_column + ": "
 	(%GPsEditLabel as Label).text = sub_table + ": "
@@ -222,13 +209,11 @@ func _on_validate_button_pressed() -> void:
 	undo_redo.add_do_property(self, "word", word_edit.text)
 	undo_redo.add_do_property(self, "exception", int(exception_edit_checkbox.button_pressed))
 	undo_redo.add_do_property(self, "reading", int(reading_edit_checkbox.button_pressed))
-	undo_redo.add_do_property(self, "writing", int(writing_edit_checkbox.button_pressed))
 	undo_redo.add_do_property(self, "booklet_only", int(booklet_only_edit_checkbox.button_pressed))
 	undo_redo.add_undo_property(self, "gp_ids", gp_ids.duplicate())
 	undo_redo.add_undo_property(self, "word", word)
 	undo_redo.add_undo_property(self, "exception", int(exception_checkbox.button_pressed))
 	undo_redo.add_undo_property(self, "reading", int(reading_checkbox.button_pressed))
-	undo_redo.add_undo_property(self, "writing", int(writing_checkbox.button_pressed))
 	undo_redo.add_undo_property(self, "booklet_only", int(booklet_only_checkbox.button_pressed))
 	
 	undo_redo.commit_action()
@@ -273,14 +258,14 @@ func insert_in_database() -> void:
 			id = Database.db.query_result[0].ID
 	
 	if id >= 0:
-		var query: String = "SELECT %s, group_concat(%s, ' ') as %ss, group_concat(%s, ' ') as %ss, group_concat(%s.ID, ' ') as %sIDs, group_concat(%s.ID, ' ') as %sIDs, %s.Exception, %s.Reading, %s.Writing, %s.BookletOnly
+		var query: String = "SELECT %s, group_concat(%s, ' ') as %ss, group_concat(%s, ' ') as %ss, group_concat(%s.ID, ' ') as %sIDs, group_concat(%s.ID, ' ') as %sIDs, %s.Exception, %s.Reading, %s.BookletOnly
 			FROM %s 
 			INNER JOIN ( SELECT * FROM %s ORDER BY %s.Position ) %s ON %s.ID = %s.%sID 
 			INNER JOIN %s ON %s.ID = %s.%s
 			WHERE %s.ID = ? 
 			GROUP BY %s.ID" % [table_graph_column, sub_table_graph_column, sub_table_graph_column,
 				sub_table_phon_column, sub_table_phon_column,
-				relational_table, relational_table, sub_table, sub_table, table, table, table, table,
+				relational_table, relational_table, sub_table, sub_table, table, table, table,
 				table,
 				relational_table, relational_table, relational_table, table, relational_table, table_graph_column,
 				sub_table, sub_table, relational_table, sub_table_id,
@@ -290,8 +275,8 @@ func insert_in_database() -> void:
 		Log.trace("WordListElement: Sending query to insert in database: %s" % query)
 		if not Database.db.query_result.is_empty():
 			var element: Dictionary = Database.db.query_result[0]
-			if word != element[table_graph_column] or exception != element.Exception or reading != element.Reading or writing != element.Writing or booklet_only != element.BookletOnly:
-				Database.db.update_rows(table, "ID=%s" % id, {table_graph_column: word, "Exception": exception, "Reading": reading, "Writing": writing, "BookletOnly": booklet_only})
+			if word != element[table_graph_column] or exception != element.Exception or reading != element.Reading or booklet_only != element.BookletOnly:
+				Database.db.update_rows(table, "ID=%s" % id, {table_graph_column: word, "Exception": exception, "Reading": reading, "BookletOnly": booklet_only})
 			if " ".join(gp_ids) != element[sub_table + "IDs"]:
 				var gps_in_words_ids: Array = Array((element[relational_table + "IDs"] as String).split(" "))
 				while gps_in_words_ids.size() > gp_ids.size():
@@ -315,8 +300,8 @@ func insert_in_database() -> void:
 			if not Database.db.query_result.is_empty():
 				var element: Dictionary = Database.db.query_result[0]
 				id = element.ID
-				if word != element[table_graph_column] or exception != element.Exception or reading != element.Reading or writing != element.Writing or booklet_only != element.BookletOnly:
-					Database.db.update_rows(table, "ID=%s" % id, {table_graph_column: word, "Exception": exception, "Reading": reading, "Writing": writing, "BookletOnly": booklet_only})
+				if word != element[table_graph_column] or exception != element.Exception or reading != element.Reading or booklet_only != element.BookletOnly:
+					Database.db.update_rows(table, "ID=%s" % id, {table_graph_column: word, "Exception": exception, "Reading": reading, "BookletOnly": booklet_only})
 				for index: int in range(gp_ids.size()):
 					Database.db.insert_row(relational_table, {
 						table_graph_column + "ID": id,
