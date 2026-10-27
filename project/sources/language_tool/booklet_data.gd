@@ -12,6 +12,15 @@ extends RefCounted
 ## BookletEntries.Part values.
 enum Part { SYLLABLES = 1, WORDS = 2, WRITING = 3, TABLES = 4, FLUENCY = 5 }
 
+## The parts whose entries are picked from any of the pack's lists -- a GP's
+## grapheme, a syllable, a word or a sentence -- and may then be printed
+## differently, as long as they still hold what was picked.
+const PACK_PICKED_PARTS: Array[int] = [Part.WRITING, Part.TABLES, Part.FLUENCY]
+const PART_NAMES: Dictionary[int, String] = {
+	Part.SYLLABLES: "syllables", Part.WORDS: "words", Part.WRITING: "writing page",
+	Part.TABLES: "tables", Part.FLUENCY: "fluency test",
+}
+
 ## BookletSentences.Break values: what comes before a sentence.
 enum Break { SAME_LINE = 0, NEW_LINE = 1, NEW_PARAGRAPH = 2 }
 
@@ -115,6 +124,10 @@ var word_ids: Dictionary[String, int] = {}
 ## [{text, lesson, booklet_only, exception}], lesson as in word_lessons.
 var word_list: Array[Dictionary] = []
 var syllable_list: Array[Dictionary] = []
+## Everything the writing page, the tables and the fluency test pick from:
+## [{text, kind, lesson, booklet_only, exception}], kind "GP", "syllable",
+## "word" or "sentence"; a grapheme once, at its first lesson.
+var pack_items: Array[Dictionary] = []
 ## Sentence ID -> {text, lesson, booklet_only}.
 var sentences: Dictionary[int, Dictionary] = {}
 ## Normalized sentence text -> sentence ID.
@@ -186,6 +199,14 @@ func load_from_database() -> void:
 			var entry: Dictionary = {text = str(row.Text), text2 = str(row.Text2), header = int(row.Header) != 0}
 			if int(row.Part) == Part.WORDS:
 				entry.base = base_word(entry.text)
+			elif int(row.Part) in PACK_PICKED_PARTS:
+				var left: Dictionary = pick_of(entry.text)
+				entry.base = left.base
+				entry.kind = left.kind
+				if not entry.text2.is_empty():
+					var right: Dictionary = pick_of(entry.text2)
+					entry.base2 = right.base
+					entry.kind2 = right.kind
 			by_id[int(row.ChapterID)].get_entries(int(row.Part)).append(entry)
 	db.query("SELECT ChapterID, Title, Text FROM BookletStories ORDER BY ChapterID, Position")
 	for row: Dictionary in db.query_result:
@@ -219,6 +240,28 @@ func refresh_lists() -> void:
 	word_list = _pickable("Words", "Word", word_lessons)
 	syllable_list = _pickable("Syllables", "Syllable", syllable_lessons)
 	_load_sentences()
+	_load_pack_items()
+
+
+func _load_pack_items() -> void:
+	pack_items.clear()
+	var graphemes: Dictionary[String, Dictionary] = {}
+	for gp: Dictionary in gps.values():
+		var grapheme: String = gp.grapheme
+		var lesson: int = gp.lesson
+		if not graphemes.has(grapheme):
+			graphemes[grapheme] = {text = grapheme, kind = "GP", lesson = lesson, booklet_only = false, exception = gp.exception}
+		elif lesson >= 0 and (int(graphemes[grapheme].lesson) < 0 or lesson < int(graphemes[grapheme].lesson)):
+			graphemes[grapheme].lesson = lesson
+			graphemes[grapheme].exception = gp.exception
+	pack_items.append_array(graphemes.values())
+	for item: Dictionary in syllable_list:
+		pack_items.append({text = item.text, kind = "syllable", lesson = item.lesson, booklet_only = item.booklet_only, exception = item.exception})
+	for item: Dictionary in word_list:
+		pack_items.append({text = item.text, kind = "word", lesson = item.lesson, booklet_only = item.booklet_only, exception = item.exception})
+	for sentence_id: int in sentences:
+		var sentence: Dictionary = sentences[sentence_id]
+		pack_items.append({text = sentence.text, kind = "sentence", lesson = sentence.lesson, booklet_only = sentence.booklet_only, exception = false})
 
 
 func _pickable(table: String, column: String, lessons: Dictionary[String, int]) -> Array[Dictionary]:
@@ -239,6 +282,54 @@ func base_word(text: String) -> String:
 		if word_ids.has(word) and word.length() > base.length():
 			base = word
 	return base
+
+
+## The pack item an entry printed as text was picked from: {base, kind}, base ""
+## when it holds none. The item spelled exactly so comes first, in the search's
+## order (a grapheme, a syllable, a word, a sentence); then the longest word,
+## syllable or sentence the text holds. A grapheme only counts spelled alone:
+## inside a text, any letter would match one.
+func pick_of(text: String) -> Dictionary:
+	var wanted: String = normalize(text)
+	for kind: String in ["GP", "syllable", "word", "sentence"]:
+		for item: Dictionary in pack_items:
+			if item.kind == kind and normalize(item.text) == wanted:
+				return {base = item.text, kind = kind}
+	var best: Dictionary = {base = "", kind = ""}
+	for item: Dictionary in pack_items:
+		if item.kind != "GP" and str(item.text).length() > str(best.base).length() and holds(text, item.text, item.kind):
+			best = {base = item.text, kind = item.kind}
+	return best
+
+
+## Whether a printed text still holds the pack item it was picked from: a word
+## or a syllable as one of its words ("lune" in "la Lune", not in "lunette"), a
+## grapheme or a sentence anywhere in it, case and spacing ignored.
+static func holds(text: String, base: String, kind: String) -> bool:
+	if base.is_empty():
+		return false
+	if kind == "word" or kind == "syllable":
+		var pieces: PackedStringArray = words_of(base)
+		if pieces.size() == 1:
+			return pieces[0] in words_of(text)
+	# On one line: a sentence edited in a one-line box loses its line breaks.
+	return normalize(base).replace("\n", " ") in normalize(text).replace("\n", " ")
+
+
+## Why an entry of a part picked from the pack cannot be saved, or "": each of
+## its cells must hold what was picked for it. A table row's right cell may be
+## empty.
+static func picked_entry_problem(entry: Dictionary) -> String:
+	var problems: PackedStringArray = []
+	var cells: Array[Array] = [[str(entry.text), str(entry.get("base", "")), str(entry.get("kind", ""))]]
+	if not str(entry.text2).is_empty():
+		cells.append([str(entry.text2), str(entry.get("base2", "")), str(entry.get("kind2", ""))])
+	for cell: Array in cells:
+		if str(cell[1]).is_empty():
+			problems.append("\"%s\" is not picked from the pack" % cell[0])
+		elif not holds(cell[0], cell[1], cell[2]):
+			problems.append("the %s \"%s\" is printed as \"%s\", which no longer holds it" % [cell[2], cell[1], cell[0]])
+	return "; ".join(problems)
 
 
 ## Adds a sentence to the Sentence List, booklet-only, linked word by word to
@@ -462,49 +553,6 @@ func value_of(chapter: Chapter, column: String) -> float:
 	return chapter.overrides.get(column, settings.get(column, 0.0))
 
 
-#region Entries as text
-
-## A part's entries, one per line; a table row as "left | right", a header row
-## starting with "*". A table cell that itself starts with "*" or "\" gets a
-## "\" in front; other parts have no header rows, so their entries are written
-## as they are.
-static func entries_text(entries: Array, part: int) -> String:
-	var lines: PackedStringArray = []
-	for entry: Dictionary in entries:
-		var line: String = entry.text
-		if not str(entry.text2).is_empty():
-			line += " | " + str(entry.text2)
-		if entry.header:
-			line = "* " + line
-		elif part == Part.TABLES and (line.begins_with("*") or line.begins_with("\\")):
-			line = "\\" + line
-		lines.append(line)
-	return "\n".join(lines)
-
-
-static func parse_entries(text: String, part: int) -> Array[Dictionary]:
-	var entries: Array[Dictionary] = []
-	for line: String in text.split("\n"):
-		var stripped: String = line.strip_edges()
-		if stripped.is_empty():
-			continue
-		var header: bool = false
-		if part == Part.TABLES and stripped.begins_with("\\"):
-			stripped = stripped.substr(1)
-		elif part == Part.TABLES and stripped.begins_with("*"):
-			header = true
-			stripped = stripped.trim_prefix("*").strip_edges()
-		# The right cell is everything after the first "|": a third cell is kept,
-		# and pointed out by problems(), rather than lost.
-		var text2: String = ""
-		if part == Part.TABLES and "|" in stripped:
-			text2 = stripped.substr(stripped.find("|") + 1).strip_edges()
-			stripped = stripped.get_slice("|", 0).strip_edges()
-		entries.append({text = stripped, text2 = text2, header = header})
-	return entries
-
-#endregion
-
 #region Fonts
 
 ## A font added from a file: path is where it was picked, which must be inside
@@ -592,7 +640,8 @@ func pack_characters() -> PackedStringArray:
 ## What would make the booklet tables unreadable (SCHEMA.md rule 8), one line
 ## each; Save refuses while there is any. Booklets are numbered 1, 2, 3... along
 ## the chapters, each chapter in the same booklet as the one before or the next;
-## and a word entry must still hold the word it was picked from.
+## a word entry must still hold the word it was picked from, and each writing,
+## table and fluency entry must be picked from the pack and still hold it.
 func save_errors() -> PackedStringArray:
 	sort_chapters()
 	var errors: PackedStringArray = []
@@ -616,6 +665,11 @@ func save_errors() -> PackedStringArray:
 			var problem: String = word_entry_problem(entry)
 			if not problem.is_empty():
 				errors.append("%s: %s" % [chapter_name(chapter), problem])
+		for part: int in PACK_PICKED_PARTS:
+			for entry: Dictionary in chapter.get_entries(part):
+				var problem: String = picked_entry_problem(entry)
+				if not problem.is_empty():
+					errors.append("%s, %s: %s" % [chapter_name(chapter), PART_NAMES[part], problem])
 	return errors
 
 

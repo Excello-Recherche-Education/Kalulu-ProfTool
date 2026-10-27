@@ -3,8 +3,8 @@ extends RefCounted
 ## Brings a language pack's database to the schema this Prof Tool writes, once,
 ## when the pack is opened.
 ##
-## The schema is version 3 of Kalulu-Languages' SCHEMA.md (exactly
-## schema/v3.sql there), and a database says which version it follows in
+## The schema is version 4 of Kalulu-Languages' SCHEMA.md (exactly
+## schema/v4.sql there), and a database says which version it follows in
 ## PRAGMA user_version. Before this, four screens each patched the parts they
 ## needed whenever they opened -- the word, syllable and sentence lists added
 ## Reading / Writing, Lesson Exercises dropped foreign keys and rewrote
@@ -15,7 +15,7 @@ extends RefCounted
 ## A pack is upgraded on the copy being edited, so the next save carries it.
 ## A pack newer than this Prof Tool knows is refused rather than guessed at.
 
-const VERSION: int = 3
+const VERSION: int = 4
 
 const LESSONS_EXERCISES_V1: String = """CREATE TABLE "%s" (
 	"ID"	INTEGER NOT NULL UNIQUE,
@@ -137,6 +137,10 @@ static func upgrade(db: SQLite) -> String:
 			return error
 	if version < 3:
 		var error: String = _to_v3(db)
+		if not error.is_empty():
+			return error
+	if version < 4:
+		var error: String = _to_v4(db)
 		if not error.is_empty():
 			return error
 	if version < VERSION:
@@ -279,6 +283,29 @@ static func _to_v3(db: SQLite) -> String:
 			return message
 	if not db.query("COMMIT"):
 		var message: String = "Could not bring this language pack to schema version 3: %s" % db.get_error_message()
+		db.query("ROLLBACK")
+		Log.error("PackSchema: %s" % message)
+		return message
+	return ""
+
+
+## Version 3 to 4: Words, Syllables and Sentences lose their Writing column,
+## which no program read -- what Kalulu-Languages' schema/v3-to-v4.sql does. In
+## one transaction; a table already without it is skipped.
+static func _to_v4(db: SQLite) -> String:
+	var steps: Array[String] = ["BEGIN TRANSACTION"]
+	for table: String in ["Words", "Syllables", "Sentences"]:
+		if "Writing" in _columns(db, table):
+			steps.append('ALTER TABLE "%s" DROP COLUMN "Writing"' % table)
+	steps.append("PRAGMA user_version = 4")
+	for step: String in steps:
+		if not db.query(step):
+			var message: String = "Could not bring this language pack to schema version 4: %s" % db.get_error_message()
+			db.query("ROLLBACK")
+			Log.error("PackSchema: %s (step: %s)" % [message, step.left(80)])
+			return message
+	if not db.query("COMMIT"):
+		var message: String = "Could not bring this language pack to schema version 4: %s" % db.get_error_message()
 		db.query("ROLLBACK")
 		Log.error("PackSchema: %s" % message)
 		return message

@@ -722,21 +722,21 @@ func _create_gp_csv() -> void:
 
 func _create_words_csv() -> void:
 	var gp_list_file: FileAccess = FileAccess.open(BASE_PATH.path_join(Database.language).path_join("words_list.csv"), FileAccess.WRITE)
-	gp_list_file.store_csv_line(["ORTHO", "GPMATCH", "LESSON", "READING", "WRITING", "BOOKLET_ONLY"])
-	var query: String = "SELECT Words.ID as WordId, Word, group_concat(Grapheme, ' ') as Graphemes, group_concat(Phoneme, ' ') as Phonemes, group_concat(GPs.ID, ' ') as GPIDs, Words.Exception, Reading, Writing, BookletOnly 
+	gp_list_file.store_csv_line(["ORTHO", "GPMATCH", "LESSON", "READING", "BOOKLET_ONLY"])
+	var query: String = "SELECT Words.ID as WordId, Word, group_concat(Grapheme, ' ') as Graphemes, group_concat(Phoneme, ' ') as Phonemes, group_concat(GPs.ID, ' ') as GPIDs, Words.Exception, Reading, BookletOnly 
 			FROM Words 
 			INNER JOIN ( SELECT * FROM GPsInWords ORDER BY GPsInWords.Position ) GPsInWords ON Words.ID = GPsInWords.WordID 
 			INNER JOIN GPs ON GPs.ID = GPsInWords.GPID
 			GROUP BY Words.ID
 			UNION ALL
-			SELECT ID, Word, '', '', '', Exception, Reading, Writing, BookletOnly FROM Words WHERE ID NOT IN ( SELECT WordID FROM GPsInWords )"
+			SELECT ID, Word, '', '', '', Exception, Reading, BookletOnly FROM Words WHERE ID NOT IN ( SELECT WordID FROM GPsInWords )"
 	Database.db.query(query)
 	var result: Array[Dictionary] = Database.db.query_result
 	for element: Dictionary in result:
 		# An entry with no decomposition is written too, as "()" in lesson -1, so the
 		# CSV lists everything the database holds.
 		if (element.GPIDs as String).is_empty():
-			gp_list_file.store_csv_line([element["Word"], "()", -1, element.Reading, element.Writing, element.BookletOnly])
+			gp_list_file.store_csv_line([element["Word"], "()", -1, element.Reading, element.BookletOnly])
 			continue
 		var gpmatch: String = "("
 		var graphemes: PackedStringArray = (element.Graphemes as String).split(" ")
@@ -752,26 +752,26 @@ func _create_words_csv() -> void:
 				lesson = -1
 				break
 			lesson = maxi(lesson, gp_id_lesson)
-		gp_list_file.store_csv_line([element.Word, gpmatch, lesson, element.Reading, element.Writing, element.BookletOnly])
+		gp_list_file.store_csv_line([element.Word, gpmatch, lesson, element.Reading, element.BookletOnly])
 
 
 func _create_syllable_csv() -> void:
 	var gp_list_file: FileAccess = FileAccess.open(BASE_PATH.path_join(Database.language).path_join("syllables_list.csv"), FileAccess.WRITE)
-	gp_list_file.store_csv_line(["ORTHO", "GPMATCH", "LESSON", "READING", "WRITING", "BOOKLET_ONLY"])
-	var query: String = "SELECT Syllables.ID as SyllableId, Syllable, group_concat(Grapheme, ' ') as Graphemes, group_concat(Phoneme, ' ') as Phonemes, group_concat(GPs.ID, ' ') as GPIDs, Syllables.Exception, Reading, Writing, BookletOnly 
+	gp_list_file.store_csv_line(["ORTHO", "GPMATCH", "LESSON", "READING", "BOOKLET_ONLY"])
+	var query: String = "SELECT Syllables.ID as SyllableId, Syllable, group_concat(Grapheme, ' ') as Graphemes, group_concat(Phoneme, ' ') as Phonemes, group_concat(GPs.ID, ' ') as GPIDs, Syllables.Exception, Reading, BookletOnly 
 			FROM Syllables 
 			INNER JOIN ( SELECT * FROM GPsInSyllables ORDER BY GPsInSyllables.Position ) GPsInSyllables ON Syllables.ID = GPsInSyllables.SyllableID 
 			INNER JOIN GPs ON GPs.ID = GPsInSyllables.GPID
 			GROUP BY Syllables.ID
 			UNION ALL
-			SELECT ID, Syllable, '', '', '', Exception, Reading, Writing, BookletOnly FROM Syllables WHERE ID NOT IN ( SELECT SyllableID FROM GPsInSyllables )"
+			SELECT ID, Syllable, '', '', '', Exception, Reading, BookletOnly FROM Syllables WHERE ID NOT IN ( SELECT SyllableID FROM GPsInSyllables )"
 	Database.db.query(query)
 	var result: Array[Dictionary] = Database.db.query_result
 	for element: Dictionary in result:
 		# An entry with no decomposition is written too, as "()" in lesson -1, so the
 		# CSV lists everything the database holds.
 		if (element.GPIDs as String).is_empty():
-			gp_list_file.store_csv_line([element["Syllable"], "()", -1, element.Reading, element.Writing, element.BookletOnly])
+			gp_list_file.store_csv_line([element["Syllable"], "()", -1, element.Reading, element.BookletOnly])
 			continue
 		var gpmatch: String = "("
 		var graphemes: PackedStringArray = (element.Graphemes as String).split(" ")
@@ -787,7 +787,7 @@ func _create_syllable_csv() -> void:
 				lesson = -1
 				break
 			lesson = maxi(lesson, gp_id_lesson)
-		gp_list_file.store_csv_line([element.Syllable, gpmatch, lesson, element.Reading, element.Writing, element.BookletOnly])
+		gp_list_file.store_csv_line([element.Syllable, gpmatch, lesson, element.Reading, element.BookletOnly])
 
 
 func _create_sentence_csv() -> void:

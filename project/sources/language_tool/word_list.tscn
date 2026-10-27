@@ -72,14 +72,6 @@ theme_override_font_sizes/font_size = 90
 text = "Reading"
 horizontal_alignment = 1
 
-[node name="Writing" type="Label" parent="VBoxContainer/MarginContainer/HBoxContainer" unique_id=1217496104]
-layout_mode = 2
-size_flags_horizontal = 3
-mouse_filter = 1
-theme_override_font_sizes/font_size = 90
-text = "Writing"
-horizontal_alignment = 1
-
 [node name="Edit" type="Label" parent="VBoxContainer/MarginContainer/HBoxContainer" unique_id=334064031]
 layout_mode = 2
 size_flags_horizontal = 3

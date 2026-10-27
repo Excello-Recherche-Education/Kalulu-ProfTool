@@ -390,14 +390,14 @@ func _show_chapter(chapter: BookletData.Chapter) -> void:
 	_editor.add_child(_label("Picked from the Sentence List, in order, each after a new paragraph, a new line, or on the same line as the one before (%s is a line break inside a sentence). Alternating: script and cursive take turns, paragraph by paragraph. \"Sentence pages\": -1 prints none, 0 only what fits on the chapter page, 1 or more that many pages more. Nothing picked: as many sentences as fit are chosen, each whole and a paragraph of its own, from those the lesson can read, the ones holding the chapter's GPs first, booklet-only ones first, then in the pack's order." % BookletData.LINE_BREAK))
 	_add_sentence_picker(chapter)
 	_heading("Penguin tables")
-	_editor.add_child(_label("One row per line, \"left | right\". Start a line with * for a bold row, which begins a new table; \\* for a cell that starts with a star."))
-	_add_entries_editor(chapter, BookletData.Part.TABLES, 220)
+	_editor.add_child(_label("Rows of two cells, each a grapheme, syllable, word or sentence picked from the pack, and printed as its box says as long as it still holds it. A pick goes into the right cell of the last row when the box below is ticked, which it is after a left cell: untick it for a row of one cell. A bold row begins a new table."))
+	_add_pack_picker(chapter, BookletData.Part.TABLES)
 	_heading("Writing page")
-	_editor.add_child(_label("One item per line: a grapheme, a syllable or words (\"un vélo\"). Empty: no writing page."))
-	_add_entries_editor(chapter, BookletData.Part.WRITING, 150)
+	_editor.add_child(_label("Models picked from the pack, in order: a grapheme, a syllable, a word or a sentence, printed as its box says as long as it still holds it (\"un vélo\" for \"vélo\"). None: no writing page."))
+	_add_pack_picker(chapter, BookletData.Part.WRITING)
 	_heading("Fluency test")
-	_editor.add_child(_label("One item per line, each printed in an earlier chapter. Empty: no fluency test."))
-	_add_entries_editor(chapter, BookletData.Part.FLUENCY, 200)
+	_editor.add_child(_label("Items picked from the pack, in order, printed as their box says as long as they still hold them; each should have been printed in an earlier chapter. None: no fluency test."))
+	_add_pack_picker(chapter, BookletData.Part.FLUENCY)
 	_heading("Stories")
 	_editor.add_child(_label("Free text, paragraphs separated by an empty line. Words not studied yet are pointed out below."))
 	for story: Dictionary in chapter.stories:
@@ -497,12 +497,6 @@ func _control_value(control: Control) -> float:
 		return (control as SpinBox).value
 	var option: OptionButton = control as OptionButton
 	return float(option.get_item_id(option.selected))
-
-
-func _add_entries_editor(chapter: BookletData.Chapter, part: int, height: float) -> void:
-	_editor.add_child(_text_edit(BookletData.entries_text(chapter.get_entries(part), part), height, func(text: String) -> void:
-		chapter.entries[part] = BookletData.parse_entries(text, part)
-		_changed()))
 
 
 func _add_story_editor(chapter: BookletData.Chapter, story: Dictionary) -> void:
@@ -884,6 +878,167 @@ func _show_count_warning(chapter: BookletData.Chapter, part: int) -> void:
 	var info: String = data.repeat_info(chapter, part)
 	_repeat_infos[part].text = "ℹ " + info if not info.is_empty() else ""
 	_repeat_infos[part].visible = not info.is_empty()
+
+
+## The pack's graphemes, syllables, words and sentences matching a query, for
+## the writing page, the tables and the fluency test: those the chapter can
+## print first, then those starting with it, graphemes before syllables, words
+## and sentences, then the shortest. A value is [text, kind].
+func _pack_matches(query: String, chapter: BookletData.Chapter) -> Array[Array]:
+	var wanted: String = query.to_lower()
+	var kinds: PackedStringArray = ["GP", "syllable", "word", "sentence"]
+	var ranked: Array[Array] = []
+	for index: int in range(data.pack_items.size()):
+		var item: Dictionary = data.pack_items[index]
+		var lowered: String = str(item.text).to_lower()
+		if not wanted in lowered:
+			continue
+		var notes: PackedStringArray = _readability_notes(int(item.lesson), chapter)
+		if item.exception:
+			notes.append("exception")
+		if item.booklet_only:
+			notes.append("booklet only")
+		var available: bool = notes.is_empty() or notes == PackedStringArray(["booklet only"])
+		var kind: String = "grapheme" if item.kind == "GP" else item.kind
+		var label: String = "%s   (%s)" % [str(item.text).replace("\n", BookletData.LINE_BREAK), ", ".join(PackedStringArray([kind]) + notes)]
+		ranked.append([[int(not available), int(not lowered.begins_with(wanted)), kinds.find(item.kind), lowered.length(), index],
+				label, [item.text, item.kind], available])
+	ranked.sort_custom(func(a: Array, b: Array) -> bool: return a[0] < b[0])
+	var found: Array[Array] = []
+	for entry: Array in ranked.slice(0, MATCHES_SHOWN):
+		found.append(entry.slice(1))
+	return found
+
+
+## A list of entries picked from the whole pack, for the writing page, the
+## tables (rows of two cells) or the fluency test.
+func _add_pack_picker(chapter: BookletData.Chapter, part: int) -> void:
+	var rows: VBoxContainer = VBoxContainer.new()
+	_editor.add_child(rows)
+	var right_cell: CheckBox = null
+	if part == BookletData.Part.TABLES:
+		right_cell = CheckBox.new()
+		right_cell.text = "Next pick goes into the right cell of the last row"
+		right_cell.add_theme_font_size_override("font_size", TEXT_SIZE)
+		var entries: Array = chapter.get_entries(part)
+		right_cell.button_pressed = not entries.is_empty() and str(entries.back().text2).is_empty()
+	_fill_pack_rows(rows, chapter, part)
+	var kind_names: String = "graphemes, syllables, words and sentences"
+	_editor.add_child(_search_box("Search the pack's %s to add…" % kind_names, _pack_matches.bind(chapter), func(value: Array) -> void:
+		var entries: Array = chapter.get_entries(part)
+		if right_cell != null and right_cell.button_pressed and not entries.is_empty() and str(entries.back().text2).is_empty():
+			entries.back().text2 = value[0]
+			entries.back().base2 = value[0]
+			entries.back().kind2 = value[1]
+			right_cell.button_pressed = false
+		else:
+			entries.append({text = value[0], text2 = "", header = false, base = value[0], kind = value[1]})
+			if right_cell != null:
+				right_cell.button_pressed = true
+		_changed()
+		_fill_pack_rows(rows, chapter, part)))
+	if right_cell != null:
+		_editor.add_child(right_cell)
+
+
+func _fill_pack_rows(rows: VBoxContainer, chapter: BookletData.Chapter, part: int) -> void:
+	_clear_children(rows)
+	var entries: Array = chapter.get_entries(part)
+	for index: int in range(entries.size()):
+		var entry: Dictionary = entries[index]
+		var row: HBoxContainer = HBoxContainer.new()
+		row.add_theme_constant_override("separation", 20)
+		rows.add_child(row)
+		row.add_child(_label("%d." % (index + 1), TEXT_SIZE, false))
+		# What each cell comes from goes on lines of their own, below the row,
+		# where they can wrap: beside the boxes, a sentence widens the form.
+		var origin: Label = _label("")
+		var notes: Label = _warning_label("")
+		var problem: Label = _warning_label("")
+		var cells: Array[String] = ["text"]
+		if part == BookletData.Part.TABLES:
+			var bold: CheckBox = CheckBox.new()
+			bold.text = "Bold"
+			bold.tooltip_text = "A bold row begins a new table."
+			bold.add_theme_font_size_override("font_size", TEXT_SIZE)
+			bold.button_pressed = entry.header
+			bold.toggled.connect(func(pressed: bool) -> void:
+				entry.header = pressed
+				_changed())
+			row.add_child(bold)
+			cells.append("text2")
+		for cell: String in cells:
+			var second: bool = cell == "text2"
+			if second:
+				row.add_child(_label("|", TEXT_SIZE, false))
+			var edit: LineEdit = LineEdit.new()
+			edit.text = str(entry[cell]).replace("\n", " ")
+			edit.placeholder_text = "(no right cell)" if second else ""
+			edit.editable = not second or not str(entry.text2).is_empty()
+			edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			edit.add_theme_font_size_override("font_size", TEXT_SIZE)
+			edit.text_changed.connect(func(text: String) -> void:
+				entry[cell] = text.strip_edges()
+				if second and entry.text2.is_empty():
+					entry.erase("base2")
+					entry.erase("kind2")
+				_show_pack_entry_notes(entry, chapter, origin, notes, problem)
+				_changed())
+			row.add_child(edit)
+		row.add_child(_button("Up", _move_pack_entry.bind(rows, chapter, part, index, -1)))
+		row.add_child(_button("Down", _move_pack_entry.bind(rows, chapter, part, index, 1)))
+		row.add_child(_button("Remove", func() -> void:
+			entries.remove_at(index)
+			_changed()
+			_fill_pack_rows(rows, chapter, part)))
+		for label: Label in [origin, notes, problem]:
+			rows.add_child(label)
+		_show_pack_entry_notes(entry, chapter, origin, notes, problem)
+
+
+## Under a picked entry: what each cell was picked from, when it is readable,
+## and why it cannot be saved.
+func _show_pack_entry_notes(entry: Dictionary, chapter: BookletData.Chapter, origin: Label, notes: Label, problem: Label) -> void:
+	var origins: PackedStringArray = []
+	var lessons: PackedStringArray = []
+	for keys: Array in [["text", "base", "kind"], ["text2", "base2", "kind2"]]:
+		if str(entry.get(keys[0], "")).is_empty():
+			continue
+		var base: String = entry.get(keys[1], "")
+		var kind: String = entry.get(keys[2], "")
+		if base.is_empty():
+			continue
+		var name: String = "grapheme" if kind == "GP" else kind
+		origins.append("from the %s \"%s\"" % [name, base.replace("\n", " ")])
+		var readability: PackedStringArray = _readability_notes(_pick_lesson(base, kind), chapter)
+		if not readability.is_empty():
+			lessons.append("\"%s\": %s" % [base.replace("\n", " "), ", ".join(readability)])
+	origin.text = "    " + "; ".join(origins) if not origins.is_empty() else ""
+	origin.visible = not origins.is_empty()
+	notes.text = "    " + "; ".join(lessons) if not lessons.is_empty() else ""
+	notes.visible = not lessons.is_empty()
+	problem.text = BookletData.picked_entry_problem(entry)
+	problem.visible = not problem.text.is_empty()
+
+
+## The lesson a picked item becomes readable at, -1 when never or unknown.
+func _pick_lesson(base: String, kind: String) -> int:
+	for item: Dictionary in data.pack_items:
+		if item.kind == kind and item.text == base:
+			return int(item.lesson)
+	return -1
+
+
+func _move_pack_entry(rows: VBoxContainer, chapter: BookletData.Chapter, part: int, index: int, direction: int) -> void:
+	var entries: Array = chapter.get_entries(part)
+	var target: int = index + direction
+	if target < 0 or target >= entries.size():
+		return
+	var moved: Variant = entries[index]
+	entries[index] = entries[target]
+	entries[target] = moved
+	_changed()
+	_fill_pack_rows(rows, chapter, part)
 
 
 func _add_sentence_picker(chapter: BookletData.Chapter) -> void:
