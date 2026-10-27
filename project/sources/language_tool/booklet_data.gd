@@ -30,7 +30,6 @@ const SETTINGS: Dictionary[String, Array] = {
 	"WritingTracings": ["Writing: grey copies to trace", 0, -1, false],
 }
 const SENTENCE_FONTS: PackedStringArray = ["Alternating", "Script only", "Cursive only"]
-const SENTENCE_FONT_CURSIVE: int = 2
 const FIRST_FONTS: PackedStringArray = ["", "Script", "Cursive"]
 
 ## Characters a booklet text is cut into words at, besides spaces: the Prof Tool's
@@ -167,13 +166,17 @@ func add_booklet_sentence(text: String) -> Dictionary:
 	var result: Dictionary = {missing = PackedStringArray(), error = ""}
 	if find_sentence(text) >= 0:
 		return result
+	# A local array: a PackedStringArray read out of a Dictionary is a copy, so
+	# appending to result.missing in place would change nothing.
 	var linked: Array[int] = []
+	var missing: PackedStringArray = []
 	for word: String in words_of(text):
 		if word_ids.has(word):
 			linked.append(word_ids[word])
-		elif not word in result.missing:
-			(result.missing as PackedStringArray).append(word)
-	if not (result.missing as PackedStringArray).is_empty():
+		elif not word in missing:
+			missing.append(word)
+	if not missing.is_empty():
+		result.missing = missing
 		return result
 	if linked.is_empty():
 		result.error = "\"%s\" has no word in it" % text.strip_edges()
@@ -323,7 +326,8 @@ func lesson_gp_ids(lesson_id: int) -> Array[int]:
 	var ids: Array[int] = []
 	Database.db.query_with_bindings("SELECT GPID FROM GPsInLessons WHERE LessonID = ? ORDER BY ID", [lesson_id])
 	for row: Dictionary in Database.db.query_result:
-		ids.append(int(row.GPID))
+		if not int(row.GPID) in ids:
+			ids.append(int(row.GPID))
 	return ids
 
 
@@ -422,8 +426,9 @@ func parse_sentences(text: String) -> Dictionary:
 #region Entries as text
 
 ## A part's entries, one per line; a table row as "left | right", a header row
-## starting with "*". A table cell that itself starts with "*" is written "\\*".
-static func entries_text(entries: Array) -> String:
+## starting with "*". A table cell that itself starts with "*" is written "\\*";
+## other parts have no header rows, so their entries are written as they are.
+static func entries_text(entries: Array, part: int) -> String:
 	var lines: PackedStringArray = []
 	for entry: Dictionary in entries:
 		var line: String = entry.text
@@ -431,7 +436,7 @@ static func entries_text(entries: Array) -> String:
 			line += " | " + str(entry.text2)
 		if entry.header:
 			line = "* " + line
-		elif line.begins_with("*"):
+		elif part == Part.TABLES and line.begins_with("*"):
 			line = "\\" + line
 		lines.append(line)
 	return "\n".join(lines)
@@ -464,8 +469,7 @@ static func parse_entries(text: String, part: int) -> Array[Dictionary]:
 
 ## What would make the booklet tables unreadable (SCHEMA.md rule 8), one line
 ## each; Save refuses while there is any. Booklets are numbered 1, 2, 3... along
-## the chapters, each chapter in the same booklet as the one before or the next,
-## and nothing is printed in cursive for a language written without it.
+## the chapters, each chapter in the same booklet as the one before or the next.
 func save_errors() -> PackedStringArray:
 	sort_chapters()
 	var errors: PackedStringArray = []
@@ -478,12 +482,6 @@ func save_errors() -> PackedStringArray:
 			errors.append("%s is in booklet %d, but must be in booklet %s" % [
 					chapter_name(chapter), chapter.booklet, " or ".join(PackedStringArray(allowed.map(func(number: int) -> String: return str(number))))])
 		previous = chapter
-	if settings.get("Cursive", 1.0) == 0.0:
-		if int(settings.get("SentenceFont", 0.0)) == SENTENCE_FONT_CURSIVE:
-			errors.append("The language is written without cursive, but its sentences are set to cursive only")
-		for chapter: Chapter in chapters:
-			if int(chapter.overrides.get("SentenceFont", -1.0)) == SENTENCE_FONT_CURSIVE:
-				errors.append("%s: sentences set to cursive only, in a language written without cursive" % chapter_name(chapter))
 	return errors
 
 
@@ -658,7 +656,11 @@ func _save_chapter(chapter: Chapter) -> String:
 	for table: String in ["BookletChapterGPs", "BookletSentences", "BookletEntries", "BookletStories"]:
 		if not db.query_with_bindings('DELETE FROM "%s" WHERE ChapterID = ?' % table, [chapter.id]):
 			return _rollback("clearing a chapter's lists")
+	var saved_gps: Array[int] = []
 	for gp_id: int in chapter.gp_ids:
+		if gp_id in saved_gps:
+			continue # each (chapter, GP) pair once: the table is UNIQUE on it
+		saved_gps.append(gp_id)
 		if not db.query_with_bindings('INSERT INTO "BookletChapterGPs" (ChapterID, GPID) VALUES (?, ?)', [chapter.id, gp_id]):
 			return _rollback("saving a chapter's GPs")
 	for index: int in range(chapter.sentences.size()):

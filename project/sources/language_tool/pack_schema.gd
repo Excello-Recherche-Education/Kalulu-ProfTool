@@ -66,7 +66,7 @@ const BOOKLET_TABLES_V2: Dictionary[String, String] = {
 	"WritingModels"	INTEGER,
 	"WritingTracings"	INTEGER,
 	PRIMARY KEY("ID" AUTOINCREMENT),
-	FOREIGN KEY("LessonID") REFERENCES "Lessons"("ID") ON UPDATE CASCADE ON DELETE CASCADE,
+	FOREIGN KEY("LessonID") REFERENCES "Lessons"("ID") ON UPDATE CASCADE ON DELETE RESTRICT,
 	FOREIGN KEY("ImageGPID") REFERENCES "GPs"("ID") ON UPDATE CASCADE ON DELETE SET NULL
 )""",
 	"BookletChapterGPs": """CREATE TABLE "BookletChapterGPs" (
@@ -74,6 +74,7 @@ const BOOKLET_TABLES_V2: Dictionary[String, String] = {
 	"ChapterID"	INTEGER NOT NULL,
 	"GPID"	INTEGER NOT NULL,
 	PRIMARY KEY("ID" AUTOINCREMENT),
+	UNIQUE("ChapterID", "GPID"),
 	FOREIGN KEY("ChapterID") REFERENCES "BookletChapters"("ID") ON UPDATE CASCADE ON DELETE CASCADE,
 	FOREIGN KEY("GPID") REFERENCES "GPs"("ID") ON UPDATE CASCADE ON DELETE CASCADE
 )""",
@@ -203,7 +204,12 @@ static func _to_v1(db: SQLite) -> String:
 		db.query("PRAGMA foreign_keys = ON")
 		Log.error("PackSchema: could not finish the upgrade: %s" % error)
 		return "Could not bring this language pack to schema version 1: %s" % error
-	db.query("COMMIT")
+	if not db.query("COMMIT"):
+		error = db.get_error_message()
+		db.query("ROLLBACK")
+		db.query("PRAGMA foreign_keys = ON")
+		Log.error("PackSchema: could not commit the upgrade: %s" % error)
+		return "Could not bring this language pack to schema version 1: %s" % error
 	db.query("PRAGMA foreign_keys = ON")
 	return ""
 
@@ -229,7 +235,11 @@ static func _to_v2(db: SQLite) -> String:
 			db.query("ROLLBACK")
 			Log.error("PackSchema: %s (step: %s)" % [message, step.left(80)])
 			return message
-	db.query("COMMIT")
+	if not db.query("COMMIT"):
+		var message: String = "Could not bring this language pack to schema version 2: %s" % db.get_error_message()
+		db.query("ROLLBACK")
+		Log.error("PackSchema: %s" % message)
+		return message
 	return ""
 
 

@@ -6,6 +6,9 @@ signal lesson_dropped(before: bool, number: int, dropped_number: int)
 var gp_label_scene: PackedScene = preload("res://sources/language_tool/lesson_gp_label.tscn")
 var number: int = 0:
 	set = set_number
+## The Lessons row this container was loaded from, -1 for one added here. Its
+## booklet chapters follow it wherever it is moved (see LessonsList's Save).
+var lesson_id: int = -1
 
 @onready var gp_container: HBoxContainer = $%GPContainer
 @onready var number_label: Label = $%NumberLabel
@@ -15,6 +18,10 @@ func set_number(p_number: int) -> void:
 	number = p_number
 	if number_label:
 		number_label.text = str(number)
+
+
+func get_gp_count() -> int:
+	return gp_container.get_child_count()
 
 
 func add_gp(new_gp: Dictionary) -> void:

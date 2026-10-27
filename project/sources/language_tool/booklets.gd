@@ -288,7 +288,7 @@ func _show_settings() -> void:
 	_editor.add_child(_label("Language settings", 60))
 	_editor.add_child(_label("Every chapter uses these unless it sets its own."))
 	var cursive: CheckBox = CheckBox.new()
-	cursive.text = "Written in cursive too (titles, sentences, writing pages)"
+	cursive.text = "Written in cursive too (titles, sentences, writing pages). Unticked: everything in script, and the sentence fonts below are ignored"
 	cursive.add_theme_font_size_override("font_size", TEXT_SIZE)
 	cursive.button_pressed = data.settings.get("Cursive", 1.0) != 0.0
 	cursive.toggled.connect(func(pressed: bool) -> void:
@@ -460,16 +460,25 @@ func _add_override_row(grid: GridContainer, chapter: BookletData.Chapter, column
 		_changed())
 	grid.add_child(control)
 	grid.add_child(_label("language: " + _setting_text(column, data.settings.get(column, 0.0)), TEXT_SIZE, false))
+	# Ticked again, the chapter's value is what the control shows, not the
+	# language's, which value_of() returns once the override is gone.
 	own.toggled.connect(func(pressed: bool) -> void:
 		if pressed:
-			chapter.overrides[column] = data.value_of(chapter, column)
+			chapter.overrides[column] = _control_value(control)
 		else:
 			chapter.overrides.erase(column)
 		_changed())
 
 
+func _control_value(control: Control) -> float:
+	if control is SpinBox:
+		return (control as SpinBox).value
+	var option: OptionButton = control as OptionButton
+	return float(option.get_item_id(option.selected))
+
+
 func _add_entries_editor(chapter: BookletData.Chapter, part: int, height: float) -> void:
-	_editor.add_child(_text_edit(BookletData.entries_text(chapter.get_entries(part)), height, func(text: String) -> void:
+	_editor.add_child(_text_edit(BookletData.entries_text(chapter.get_entries(part), part), height, func(text: String) -> void:
 		chapter.entries[part] = BookletData.parse_entries(text, part)
 		_changed()))
 
@@ -519,13 +528,25 @@ func _on_add_missing_pressed(chapter: BookletData.Chapter, sentences_edit: TextE
 		if not str(result.error).is_empty():
 			errors.append(result.error)
 	_on_sentences_changed(text, chapter)
+	# Other chapters' drafts may name the sentences just added.
+	_reparse_drafts()
 	_show_problems()
 	if not errors.is_empty():
 		_status.text = "Some sentences could not be added: " + "; ".join(errors)
 	elif not not_found.is_empty():
 		_status.text = "Some sentences could not be added: add these words to the Word List first: " + ", ".join(not_found)
 	else:
-		_status.text = "Missing sentences added to the Sentence List, booklet only."
+		_status.text = "Missing sentences added to the Sentence List, booklet only. They are written now: they stay there even if you leave without saving."
+
+
+## Reads every pending draft again, keeping only those that still name a
+## sentence the Sentence List lacks.
+func _reparse_drafts() -> void:
+	for chapter: BookletData.Chapter in _sentence_drafts.keys():
+		var parsed: Dictionary = data.parse_sentences(_sentence_drafts[chapter])
+		chapter.sentences.assign(parsed.sentences)
+		if (parsed.missing as PackedStringArray).is_empty():
+			_sentence_drafts.erase(chapter)
 
 
 func _show_problems() -> void:
@@ -548,6 +569,7 @@ func _changed() -> void:
 
 
 func _on_save_pressed() -> void:
+	_reparse_drafts()
 	for chapter: BookletData.Chapter in _sentence_drafts:
 		_status.text = "Lesson %d, chapter %d names sentences the Sentence List does not have: add them, or remove them, before saving." % [chapter.lesson_nb, chapter.position + 1]
 		return

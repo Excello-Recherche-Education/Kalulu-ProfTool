@@ -191,14 +191,23 @@ func _on_save_button_pressed() -> void:
 ## the game (Kalulu-Languages SCHEMA.md rule 7), so ticking Booklet only on a
 ## word, or saving a sentence, makes every such sentence booklet-only too.
 func _mark_sentences_of_booklet_only_words() -> void:
-	Database.db.query("UPDATE Sentences SET BookletOnly = 1 WHERE BookletOnly = 0 AND ID IN (
-		SELECT WordsInSentences.SentenceID FROM WordsInSentences
+	var holding: String = "SELECT WordsInSentences.SentenceID FROM WordsInSentences
 		INNER JOIN Words ON Words.ID = WordsInSentences.WordID
-		WHERE Words.BookletOnly = 1)")
-	Database.db.query("SELECT changes() AS Count")
-	var count: int = int(Database.db.query_result[0].Count) if not Database.db.query_result.is_empty() else 0
-	if count > 0:
-		error_label.text = "%d sentence(s) holding a booklet-only word are now booklet-only too." % count
+		WHERE Words.BookletOnly = 1"
+	Database.db.query("SELECT ID FROM Sentences WHERE BookletOnly = 0 AND ID IN (%s)" % holding)
+	var marked: Dictionary[int, bool] = {}
+	for row: Dictionary in Database.db.query_result:
+		marked[int(row.ID)] = true
+	if marked.is_empty():
+		return
+	Database.db.query("UPDATE Sentences SET BookletOnly = 1 WHERE BookletOnly = 0 AND ID IN (%s)" % holding)
+	# On the Sentence List, the rows on screen follow, or the next Save would
+	# write 0 back before marking them again.
+	if _element.table == "Sentences":
+		for element: WordListElement in elements_container.get_children():
+			if marked.has(element.id):
+				element.booklet_only = 1
+	error_label.text = "%d sentence(s) holding a booklet-only word are now booklet-only too." % marked.size()
 
 
 func _on_back_button_pressed() -> void:
@@ -282,7 +291,8 @@ func _on_list_title_import_path_selected(path: String, match_to_file: bool) -> v
 	
 	# delete elements that are not in file
 	if match_to_file:
-		var query: String = "Select * FROM Words"
+		# Booklet-only entries are not the file's: a lexicon need not list them.
+		var query: String = "Select * FROM Words WHERE BookletOnly = 0"
 		Database.db.query(query)
 		var result: Array[Dictionary] = Database.db.query_result
 		for element: Dictionary in result:
