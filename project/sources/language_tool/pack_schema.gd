@@ -227,7 +227,9 @@ static func _to_v2(db: SQLite) -> String:
 	for table: String in BOOKLET_TABLES_V2:
 		if not _table_exists(db, table):
 			steps.append(BOOKLET_TABLES_V2[table])
-	steps.append('INSERT INTO "BookletSettings" ("Cursive") SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM "BookletSettings")')
+	# SentencePages 0, not the column's DEFAULT 1: 0 is the chapter page only,
+	# what 1 meant until 2026-10-27 (Kalulu-Languages schema/v1-to-v2.sql).
+	steps.append('INSERT INTO "BookletSettings" ("Cursive", "SentencePages") SELECT 1, 0 WHERE NOT EXISTS (SELECT 1 FROM "BookletSettings")')
 	steps.append("PRAGMA user_version = 2")
 	for step: String in steps:
 		if not db.query(step):
