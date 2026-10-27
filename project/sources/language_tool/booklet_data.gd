@@ -21,23 +21,23 @@ enum Break { SAME_LINE = 0, NEW_LINE = 1, NEW_PARAGRAPH = 2 }
 const SETTINGS: Dictionary[String, Array] = {
 	"SyllableCount": ["Syllables printed", 0, 999, false],
 	"SyllableColumns": ["Syllable columns", 1, 10, false],
-	"WordCount": ["Words chosen automatically", 0, 999, false],
+	"WordCount": ["Words printed", 0, 999, false],
 	"WordColumns": ["Word columns", 1, 10, false],
 	"UppercaseProportion": ["Share in capitals (0-1)", 0, 1, true],
 	"SentenceFont": ["Sentence font", 0, 2, false],
 	"SentenceFirstFont": ["First paragraph's font", 1, 2, false],
-	"SentencePages": ["Sentence pages (0 = all)", 0, 99, false],
+	"SentencePages": ["Sentence pages (-1 none, 0 chapter page only)", -1, 99, false],
 	"WritingModels": ["Writing: black copies", 0, 10, false],
 	"WritingTracings": ["Writing: grey copies to trace", 0, 10, false],
 }
 const SENTENCE_FONTS: PackedStringArray = ["Alternating", "Script only", "Cursive only"]
 const FIRST_FONTS: PackedStringArray = ["", "Script", "Cursive"]
 
+## How the Booklets screen shows a line break that is part of a sentence.
+const LINE_BREAK: String = "⏎"
 ## Characters a booklet text is cut into words at, besides spaces: the Prof Tool's
 ## sentence parser's, plus the typography a story carries. An apostrophe cuts too,
 ## so "l'ours" is the words "l" and "ours", as the Sentence List stores it.
-## How the Sentences box shows a line break that is part of a sentence.
-const LINE_BREAK: String = "⏎"
 const SEPARATORS: String = "'’!()[]{};:\"\\,<>./?@#$%^&*_~«»…–—|"
 
 ## A chapter of a booklet and everything listed in it.
@@ -56,7 +56,9 @@ class Chapter:
 	var gp_ids: Array[int] = []
 	## {id: SentenceID, brk: Break}, in order.
 	var sentences: Array[Dictionary] = []
-	## Part -> Array of {text, text2, header}, in order.
+	## Part -> Array of {text, text2, header}, in order. A word entry also has
+	## base: the Words entry it was picked from, which its text must still hold
+	## ("la Lune" for "lune"); not saved, worked out again on loading.
 	var entries: Dictionary[int, Array] = {}
 	## {title, text}, in order.
 	var stories: Array[Dictionary] = []
@@ -82,6 +84,10 @@ var word_lessons: Dictionary[String, int] = {}
 var syllable_lessons: Dictionary[String, int] = {}
 ## Lowercased word -> its ID in Words.
 var word_ids: Dictionary[String, int] = {}
+## What the Booklets screen picks from, in the pack's order:
+## [{text, lesson, booklet_only, exception}], lesson as in word_lessons.
+var word_list: Array[Dictionary] = []
+var syllable_list: Array[Dictionary] = []
 ## Sentence ID -> {text, lesson, booklet_only}.
 var sentences: Dictionary[int, Dictionary] = {}
 ## Normalized sentence text -> sentence ID.
@@ -135,8 +141,10 @@ func load_from_database() -> void:
 	db.query("SELECT ChapterID, Part, Text, Text2, Header FROM BookletEntries ORDER BY ChapterID, Part, Position")
 	for row: Dictionary in db.query_result:
 		if by_id.has(int(row.ChapterID)):
-			by_id[int(row.ChapterID)].get_entries(int(row.Part)).append(
-					{text = str(row.Text), text2 = str(row.Text2), header = int(row.Header) != 0})
+			var entry: Dictionary = {text = str(row.Text), text2 = str(row.Text2), header = int(row.Header) != 0}
+			if int(row.Part) == Part.WORDS:
+				entry.base = base_word(entry.text)
+			by_id[int(row.ChapterID)].get_entries(int(row.Part)).append(entry)
 	db.query("SELECT ChapterID, Title, Text FROM BookletStories ORDER BY ChapterID, Position")
 	for row: Dictionary in db.query_result:
 		if by_id.has(int(row.ChapterID)):
@@ -154,7 +162,29 @@ func refresh_lists() -> void:
 	for row: Dictionary in Database.db.query_result:
 		word_ids[str(row.Word).to_lower()] = int(row.ID)
 	syllable_lessons = _readable_lessons("Syllables", "Syllable", "GPsInSyllables", "SyllableID")
+	word_list = _pickable("Words", "Word", word_lessons)
+	syllable_list = _pickable("Syllables", "Syllable", syllable_lessons)
 	_load_sentences()
+
+
+func _pickable(table: String, column: String, lessons: Dictionary[String, int]) -> Array[Dictionary]:
+	var list: Array[Dictionary] = []
+	Database.db.query("SELECT %s AS Text, Exception, BookletOnly FROM %s ORDER BY ID" % [column, table])
+	for row: Dictionary in Database.db.query_result:
+		var text: String = str(row.Text)
+		list.append({text = text, lesson = lessons.get(text.to_lower(), -1),
+				booklet_only = int(row.BookletOnly) != 0, exception = int(row.Exception) != 0})
+	return list
+
+
+## The Words entry a word entry is printed from: the longest of its words the
+## Word List has ("lune" in "la Lune"), or "" when it has none.
+func base_word(text: String) -> String:
+	var base: String = ""
+	for word: String in words_of(text):
+		if word_ids.has(word) and word.length() > base.length():
+			base = word
+	return base
 
 
 ## Adds a sentence to the Sentence List, booklet-only, linked word by word to
@@ -378,54 +408,6 @@ func value_of(chapter: Chapter, column: String) -> float:
 	return chapter.overrides.get(column, settings.get(column, 0.0))
 
 
-#region Sentences as text
-
-## A chapter's sentences as the screen edits them: one line per printed line,
-## " | " between sentences sharing a line, an empty line between paragraphs. A
-## line break inside a sentence (SCHEMA.md allows one) is written LINE_BREAK,
-## and a "|" inside one "\|".
-func sentences_text(chapter: Chapter) -> String:
-	var text: String = ""
-	for index: int in range(chapter.sentences.size()):
-		var item: Dictionary = chapter.sentences[index]
-		if index > 0:
-			match int(item.brk):
-				Break.SAME_LINE:
-					text += " | "
-				Break.NEW_LINE:
-					text += "\n"
-				_:
-					text += "\n\n"
-		text += (sentences[item.id].text as String).replace("|", "\\|").replace("\n", LINE_BREAK) if sentences.has(item.id) else "?"
-	return text
-
-
-## Reads sentences_text() back. Returns {sentences: [{id, brk}], missing: [text]}:
-## the sentences found in the Sentence List, and the texts that are not in it.
-func parse_sentences(text: String) -> Dictionary:
-	var found: Array[Dictionary] = []
-	var missing: PackedStringArray = []
-	var brk: int = Break.NEW_PARAGRAPH
-	for line: String in text.split("\n"):
-		if line.strip_edges().is_empty():
-			brk = Break.NEW_PARAGRAPH
-			continue
-		# Split at every "|" not written "\|", which belongs to a sentence.
-		for piece: String in line.replace("\\|", "\u0001").split("|"):
-			if piece.strip_edges().is_empty():
-				continue
-			var sentence_text: String = piece.replace("\u0001", "|").replace(LINE_BREAK, "\n")
-			var sentence_id: int = find_sentence(sentence_text)
-			if sentence_id < 0:
-				missing.append(sentence_text.strip_edges())
-			else:
-				found.append({id = sentence_id, brk = brk})
-			brk = Break.SAME_LINE
-		brk = Break.NEW_LINE
-	return {sentences = found, missing = missing}
-
-#endregion
-
 #region Entries as text
 
 ## A part's entries, one per line; a table row as "left | right", a header row
@@ -473,7 +455,8 @@ static func parse_entries(text: String, part: int) -> Array[Dictionary]:
 
 ## What would make the booklet tables unreadable (SCHEMA.md rule 8), one line
 ## each; Save refuses while there is any. Booklets are numbered 1, 2, 3... along
-## the chapters, each chapter in the same booklet as the one before or the next.
+## the chapters, each chapter in the same booklet as the one before or the next;
+## and a word entry must still hold the word it was picked from.
 func save_errors() -> PackedStringArray:
 	sort_chapters()
 	var errors: PackedStringArray = []
@@ -486,7 +469,54 @@ func save_errors() -> PackedStringArray:
 			errors.append("%s is in booklet %d, but must be in booklet %s" % [
 					chapter_name(chapter), chapter.booklet, " or ".join(PackedStringArray(allowed.map(func(number: int) -> String: return str(number))))])
 		previous = chapter
+		for entry: Dictionary in chapter.get_entries(Part.WORDS):
+			var problem: String = word_entry_problem(entry)
+			if not problem.is_empty():
+				errors.append("%s: %s" % [chapter_name(chapter), problem])
 	return errors
+
+
+## Why a word entry cannot be saved as it is printed, or "": its text must still
+## hold the word it was picked from.
+static func word_entry_problem(entry: Dictionary) -> String:
+	var base: String = entry.get("base", "")
+	if base.is_empty() or base in words_of(entry.text):
+		return ""
+	return "the word \"%s\" is printed as \"%s\", which no longer holds it" % [base, entry.text]
+
+
+## What the Booklets screen says, as information, when a chapter picks the same
+## syllable or word more than once (a word by the one it was picked from): it may
+## be meant, and each pick is printed. "" when every pick is different.
+func repeat_info(chapter: Chapter, part: int) -> String:
+	var counts: Dictionary[String, int] = {}
+	for entry: Dictionary in chapter.get_entries(part):
+		var key: String = str(entry.get("base", ""))
+		if key.is_empty():
+			key = str(entry.text).to_lower()
+		counts[key] = counts.get(key, 0) + 1
+	var repeated: PackedStringArray = []
+	for key: String in counts:
+		if counts[key] > 1:
+			repeated.append("\"%s\" %d times" % [key, counts[key]])
+	if repeated.is_empty():
+		return ""
+	return "Picked more than once: %s. Each pick is printed." % ", ".join(repeated)
+
+
+## What the Booklets screen says when a chapter's picks are not the count it
+## prints, or "" when they are, or when nothing is picked.
+func count_warning(chapter: Chapter, part: int) -> String:
+	var picked: int = chapter.get_entries(part).size()
+	var count: int = int(value_of(chapter, "SyllableCount" if part == Part.SYLLABLES else "WordCount"))
+	var kind: String = "syllable" if part == Part.SYLLABLES else "word"
+	if picked == 0 or picked == count:
+		return ""
+	var picks: String = "%d %s%s picked, %d printed" % [picked, kind, "" if picked == 1 else "s", count]
+	if picked > count:
+		return "%s: the last %d will be left out." % [picks, picked - count]
+	return "%s: the other %d will be chosen from the %ss this lesson can read that hold one of the chapter's GPs, booklet-only ones first, then in the pack's order." % [
+			picks, count - picked, kind]
 
 
 func chapter_name(chapter: Chapter) -> String:
@@ -498,6 +528,10 @@ func chapter_name(chapter: Chapter) -> String:
 ## validator reports the sentences again (rule 9), the generator the rest.
 func problems(chapter: Chapter) -> PackedStringArray:
 	var found: PackedStringArray = []
+	for part: int in [Part.SYLLABLES, Part.WORDS]:
+		var warning: String = count_warning(chapter, part)
+		if not warning.is_empty():
+			found.append(warning)
 	for entry: Dictionary in chapter.get_entries(Part.TABLES):
 		if "|" in str(entry.text2):
 			found.append("Table row \"%s | %s\": a table has two cells; the second holds all the rest" % [entry.text, entry.text2])
