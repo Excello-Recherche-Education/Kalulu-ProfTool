@@ -686,10 +686,17 @@ func _create_words_csv() -> void:
 			FROM Words 
 			INNER JOIN ( SELECT * FROM GPsInWords ORDER BY GPsInWords.Position ) GPsInWords ON Words.ID = GPsInWords.WordID 
 			INNER JOIN GPs ON GPs.ID = GPsInWords.GPID
-			GROUP BY Words.ID"
+			GROUP BY Words.ID
+			UNION ALL
+			SELECT ID, Word, '', '', '', Exception, Reading, Writing FROM Words WHERE ID NOT IN ( SELECT WordID FROM GPsInWords )"
 	Database.db.query(query)
 	var result: Array[Dictionary] = Database.db.query_result
 	for element: Dictionary in result:
+		# An entry with no decomposition is written too, as "()" in lesson -1, so the
+		# CSV lists everything the database holds.
+		if (element.GPIDs as String).is_empty():
+			gp_list_file.store_csv_line([element["Word"], "()", -1, element.Reading, element.Writing])
+			continue
 		var gpmatch: String = "("
 		var graphemes: PackedStringArray = (element.Graphemes as String).split(" ")
 		var phonemes: PackedStringArray = (element.Phonemes as String).split(" ")
@@ -714,10 +721,17 @@ func _create_syllable_csv() -> void:
 			FROM Syllables 
 			INNER JOIN ( SELECT * FROM GPsInSyllables ORDER BY GPsInSyllables.Position ) GPsInSyllables ON Syllables.ID = GPsInSyllables.SyllableID 
 			INNER JOIN GPs ON GPs.ID = GPsInSyllables.GPID
-			GROUP BY Syllables.ID"
+			GROUP BY Syllables.ID
+			UNION ALL
+			SELECT ID, Syllable, '', '', '', Exception, Reading, Writing FROM Syllables WHERE ID NOT IN ( SELECT SyllableID FROM GPsInSyllables )"
 	Database.db.query(query)
 	var result: Array[Dictionary] = Database.db.query_result
 	for element: Dictionary in result:
+		# An entry with no decomposition is written too, as "()" in lesson -1, so the
+		# CSV lists everything the database holds.
+		if (element.GPIDs as String).is_empty():
+			gp_list_file.store_csv_line([element["Syllable"], "()", -1, element.Reading, element.Writing])
+			continue
 		var gpmatch: String = "("
 		var graphemes: PackedStringArray = (element.Graphemes as String).split(" ")
 		var phonemes: PackedStringArray = (element.Phonemes as String).split(" ")
@@ -738,15 +752,20 @@ func _create_syllable_csv() -> void:
 func _create_sentence_csv() -> void:
 	var gp_list_file: FileAccess = FileAccess.open(BASE_PATH.path_join(Database.language).path_join("sentences_list.csv"), FileAccess.WRITE)
 	gp_list_file.store_csv_line(["Sentence", "Lesson"])
-	var query: String = "SELECT Sentences.ID as SentenceId, Sentence, group_concat(Word, ' ') as Words, group_concat(Word, ' ') as Words, group_concat(Words.ID, ' ') as WordIDs, Sentences.Exception 
+	var query: String = "SELECT Sentences.ID as SentenceId, Sentence, group_concat(Word, ' ') as Words, group_concat(Words.ID, ' ') as WordIDs, Sentences.Exception 
 			FROM Sentences 
 			INNER JOIN ( SELECT * FROM WordsInSentences ORDER BY WordsInSentences.Position ) WordsInSentences ON Sentences.ID = WordsInSentences.SentenceID 
 			INNER JOIN Words ON Words.ID = WordsInSentences.WordID
-			GROUP BY Sentences.ID"
+			GROUP BY Sentences.ID
+			UNION ALL
+			SELECT ID, Sentence, '', '', Exception FROM Sentences WHERE ID NOT IN ( SELECT SentenceID FROM WordsInSentences )"
 	Database.db.query(query)
 	var result: Array[Dictionary] = Database.db.query_result
 	for element: Dictionary in result:
 		var lesson: int = -1
+		if (element.WordIDs as String).is_empty():
+			gp_list_file.store_csv_line([element.Sentence, lesson])
+			continue
 		for word_id: String in (element.WordIDs as String).split(' '):
 			var ind: int = Database.get_min_lesson_for_word_id(int(word_id))
 			if ind < 0:

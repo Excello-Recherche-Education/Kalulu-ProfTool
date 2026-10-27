@@ -7,6 +7,7 @@ signal validated()
 signal gps_updated()
 
 const GP_LIST_BUTTON_SCENE: PackedScene = preload("res://sources/language_tool/gp_list_button.tscn")
+const NO_DECOMPOSITION_COLOR: Color = Color(1.0, 0.6, 0.1)
 const PLUS_BUTTON_SCENE: PackedScene = preload("res://sources/language_tool/plus_button.tscn")
 
 @export var table: String = "Words"
@@ -84,12 +85,38 @@ func set_word(p_word: String) -> void:
 		word_label.text = word
 	if word_edit:
 		word_edit.text = word
+	_show_decomposition_warning()
 
 
 func set_gp_ids(p_gp_ids: Array[int]) -> void:
 	gp_ids = p_gp_ids
 	if graphemes_label:
 		graphemes_label.text = get_gps(gp_ids)
+	_show_decomposition_warning()
+
+
+## True for an entry stored with no row in its relational table (GPsInWords,
+## GPsInSyllables, WordsInSentences): the game can never offer it, and SCHEMA.md
+## rule 1 reports it. A new entry still being typed has no text yet and is not one.
+func has_no_decomposition() -> bool:
+	return gp_ids.is_empty() and not word.is_empty()
+
+
+## Marks an entry with no decomposition, so it can be decomposed or deleted here:
+## the list used to leave such entries out entirely.
+func _show_decomposition_warning() -> void:
+	if not word_label or not graphemes_label:
+		return
+	if has_no_decomposition():
+		var message: String = "No %s: add them, or delete this %s" % [sub_table, table_graph_column.to_lower()]
+		graphemes_label.text = "⚠ " + message
+		graphemes_label.add_theme_color_override("font_color", NO_DECOMPOSITION_COLOR)
+		word_label.add_theme_color_override("font_color", NO_DECOMPOSITION_COLOR)
+		word_label.tooltip_text = message
+	else:
+		graphemes_label.remove_theme_color_override("font_color")
+		word_label.remove_theme_color_override("font_color")
+		word_label.tooltip_text = ""
 
 
 func set_graphemes_edit(p_gp_ids: Array[int]) -> void:
@@ -207,6 +234,10 @@ func update_lesson() -> void:
 
 func gp_ids_from_string(p_gp_ids: String) -> Array[int]:
 	var res: Array[int] = []
+	# An entry with no decomposition comes back as an empty string, and "".split(" ")
+	# is [""], which would read as GP 0.
+	if p_gp_ids.is_empty():
+		return res
 	var pack: PackedStringArray = p_gp_ids.split(" ")
 	res.resize(pack.size())
 	for index: int in range(pack.size()):
@@ -268,7 +299,7 @@ func insert_in_database() -> void:
 			if not Database.db.query_result.is_empty():
 				var element: Dictionary = Database.db.query_result[0]
 				id = element.ID
-				if word != element[table_graph_column] or exception != element.Exception or reading != element.Reading or writing != element.writing:
+				if word != element[table_graph_column] or exception != element.Exception or reading != element.Reading or writing != element.Writing:
 					Database.db.update_rows(table, "ID=%s" % id, {table_graph_column: word, "Exception": exception, "Reading": reading, "Writing": writing})
 				for index: int in range(gp_ids.size()):
 					Database.db.insert_row(relational_table, {
