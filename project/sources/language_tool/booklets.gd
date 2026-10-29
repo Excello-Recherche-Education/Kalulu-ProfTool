@@ -27,6 +27,9 @@ var _dirty: bool = false
 
 var _chapter_list: ItemList
 var _lesson_picker: OptionButton
+var _up_button: Button
+var _down_button: Button
+var _delete_button: Button
 var _editor: VBoxContainer
 var _status: Label
 var _problems_label: Label
@@ -47,9 +50,16 @@ func _ready() -> void:
 	data.load_from_database()
 	_fill_chapter_list()
 	_show_settings()
-	if data.made_default_chapters:
+	if not data.made_chapters_for.is_empty():
 		_changed()
-		_status.text = "This pack had no chapter: here is one per lesson, from its GPs, with the language's settings. Save to keep them."
+		if data.made_chapters_for.size() == data.lesson_ids.size():
+			_status.text = "This pack had no chapter: here is one per lesson, from its GPs, with the language's settings. Save to keep them."
+		else:
+			var numbers: PackedStringArray = []
+			for number: int in data.made_chapters_for:
+				numbers.append(str(number))
+			_status.text = "Every lesson has a chapter: lesson %s had none, and now has one made from its GPs. Save to keep it." % ", ".join(numbers) if numbers.size() == 1 \
+					else "Every lesson has a chapter: lessons %s had none, and now have one made from their GPs. Save to keep them." % ", ".join(numbers)
 
 
 #region Layout
@@ -99,16 +109,22 @@ func _build_layout() -> void:
 	left.add_child(_chapter_list)
 	var add_row: HBoxContainer = HBoxContainer.new()
 	left.add_child(add_row)
+	# An optional chapter goes after its lesson's forced one and those already
+	# there, so before the next lesson's.
+	add_row.add_child(_button("Add chapter", _on_add_chapter_pressed))
 	_lesson_picker = _option_button()
 	for lesson_nb: int in data_lesson_numbers():
-		_lesson_picker.add_item("Lesson %d" % lesson_nb, lesson_nb)
+		_lesson_picker.add_item("after lesson %d" % lesson_nb, lesson_nb)
 	add_row.add_child(_lesson_picker)
-	add_row.add_child(_button("Add chapter", _on_add_chapter_pressed))
 	var move_row: HBoxContainer = HBoxContainer.new()
 	left.add_child(move_row)
-	move_row.add_child(_button("Up", _on_move_pressed.bind(-1)))
-	move_row.add_child(_button("Down", _on_move_pressed.bind(1)))
-	move_row.add_child(_button("Delete chapter", _on_delete_chapter_pressed))
+	_up_button = _button("Up", _on_move_pressed.bind(-1))
+	move_row.add_child(_up_button)
+	_down_button = _button("Down", _on_move_pressed.bind(1))
+	move_row.add_child(_down_button)
+	_delete_button = _button("Delete chapter", _on_delete_chapter_pressed)
+	move_row.add_child(_delete_button)
+	_update_chapter_buttons()
 
 	var right: VBoxContainer = VBoxContainer.new()
 	right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -249,7 +265,12 @@ func _fill_chapter_list() -> void:
 			_chapter_list.set_item_selectable(separator, false)
 			_chapter_list.set_item_disabled(separator, true)
 		var title: String = chapter.title.replace("\n", " / ")
-		var index: int = _chapter_list.add_item("Lesson %d.%d   %s" % [chapter.lesson_nb, chapter.position + 1, title if not title.is_empty() else "(no title)"])
+		if title.is_empty():
+			title = "(no title)"
+		var label: String = "Lesson %d   %s" % [chapter.lesson_nb, title]
+		if not BookletData.is_forced(chapter):
+			label = "      + optional   %s" % title
+		var index: int = _chapter_list.add_item(label)
 		_chapter_list.set_item_metadata(index, chapter)
 		if chapter == _chapter:
 			_chapter_list.select(index)
@@ -272,12 +293,15 @@ func _on_add_chapter_pressed() -> void:
 	_show_chapter(chapter)
 
 
-## Moves the selected chapter among the chapters of its lesson; chapters never
-## leave their lesson's place in the order.
+## Moves the selected optional chapter among the optional chapters of its
+## lesson: chapters never leave their lesson's place in the order, and the
+## lesson's forced chapter stays first.
 func _on_move_pressed(direction: int) -> void:
-	if _chapter == null:
+	if _chapter == null or BookletData.is_forced(_chapter):
 		return
 	var target: int = _chapter.position + direction
+	if target < 1:
+		return
 	for other: BookletData.Chapter in data.chapters:
 		if other.lesson_id == _chapter.lesson_id and other.position == target:
 			other.position = _chapter.position
@@ -289,8 +313,10 @@ func _on_move_pressed(direction: int) -> void:
 			return
 
 
+## Deletes the selected chapter if it is an optional one: a lesson's forced
+## chapter goes only with its lesson, in the Lesson List.
 func _on_delete_chapter_pressed() -> void:
-	if _chapter == null:
+	if _chapter == null or BookletData.is_forced(_chapter):
 		return
 	data.chapters.erase(_chapter)
 	data.sort_chapters()
@@ -299,6 +325,20 @@ func _on_delete_chapter_pressed() -> void:
 	_fill_chapter_list()
 	_show_settings()
 
+## Up, Down and Delete act on optional chapters only, and Up and Down within
+## their lesson.
+func _update_chapter_buttons() -> void:
+	var optional: bool = _chapter != null and not BookletData.is_forced(_chapter)
+	var last: bool = true
+	if optional:
+		for other: BookletData.Chapter in data.chapters:
+			if other.lesson_id == _chapter.lesson_id and other.position > _chapter.position:
+				last = false
+	_up_button.disabled = not optional or _chapter.position <= 1
+	_down_button.disabled = not optional or last
+	_delete_button.disabled = not optional
+	_delete_button.tooltip_text = "" if optional or _chapter == null else "A lesson's first chapter is always printed: it goes only with its lesson, in the Lesson List."
+
 #endregion
 
 #region Editors
@@ -306,6 +346,7 @@ func _on_delete_chapter_pressed() -> void:
 func _show_settings() -> void:
 	_chapter = null
 	_chapter_list.deselect_all()
+	_update_chapter_buttons()
 	_clear_editor()
 	_editor.add_child(_label("Language settings", 60))
 	_editor.add_child(_label("Every chapter uses these unless it sets its own."))
@@ -334,8 +375,14 @@ func _show_settings() -> void:
 
 func _show_chapter(chapter: BookletData.Chapter) -> void:
 	_chapter = chapter
+	_update_chapter_buttons()
 	_clear_editor()
-	_editor.add_child(_label("Lesson %d, chapter %d" % [chapter.lesson_nb, chapter.position + 1], 60))
+	if BookletData.is_forced(chapter):
+		_editor.add_child(_label("Lesson %d" % chapter.lesson_nb, 60))
+		_editor.add_child(_label("The lesson's chapter: every lesson has one, always printed. It goes only with its lesson, in the Lesson List."))
+	else:
+		_editor.add_child(_label("Lesson %d, optional chapter %d" % [chapter.lesson_nb, chapter.position], 60))
+		_editor.add_child(_label("Printed after the lesson's chapter, before the next lesson's. Delete it if it is not wanted."))
 
 	var row: HBoxContainer = HBoxContainer.new()
 	row.add_theme_constant_override("separation", 30)
