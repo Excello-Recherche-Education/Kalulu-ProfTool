@@ -104,9 +104,9 @@ var fonts: Array[BookletFont] = []
 ## FONT_ROLES column -> the font replacing that default one; absent keeps it.
 var font_choices: Dictionary[String, BookletFont] = {}
 var chapters: Array[Chapter] = []
-## True when the pack had no chapter and load_from_database() made the default
-## ones, which are not in the pack until they are saved.
-var made_default_chapters: bool = false
+## The lessons that had no chapter, whose forced chapter load_from_database()
+## made: not in the pack until they are saved.
+var made_chapters_for: Array[int] = []
 
 ## Lesson ID -> LessonNb, and LessonNb -> lesson ID.
 var lesson_numbers: Dictionary[int, int] = {}
@@ -213,18 +213,29 @@ func load_from_database() -> void:
 		if by_id.has(int(row.ChapterID)):
 			by_id[int(row.ChapterID)].stories.append({title = str(row.Title), text = str(row.Text)})
 	sort_chapters()
-	made_default_chapters = chapters.is_empty() and not lesson_ids.is_empty()
-	if made_default_chapters:
-		add_default_chapters()
+	add_missing_chapters()
 
 
-## A pack with no chapter starts with one per lesson, in the lessons' order,
-## each made as Add chapter makes one, every setting the language's: what
-## Kalulu-Booklets prints for such a pack (Kalulu-Languages SCHEMA.md, "The
-## reading booklets").
-func add_default_chapters() -> void:
+## Every lesson has a chapter, its forced one: a lesson that has none gets it,
+## in the lessons' order, made as Add chapter makes one, every setting the
+## language's. Kalulu-Booklets prints the same for such a lesson
+## (Kalulu-Languages SCHEMA.md, "The reading booklets").
+func add_missing_chapters() -> void:
+	made_chapters_for.clear()
+	var have: Dictionary[int, bool] = {}
+	for chapter: Chapter in chapters:
+		have[chapter.lesson_id] = true
 	for lesson_nb: int in lesson_ids:
-		add_chapter(lesson_ids[lesson_nb])
+		if not have.has(lesson_ids[lesson_nb]):
+			add_chapter(lesson_ids[lesson_nb])
+			made_chapters_for.append(lesson_nb)
+
+
+## Whether a chapter is its lesson's forced one: the first of the lesson's
+## chapters. It is always printed and cannot be deleted; the ones after it are
+## optional, and come before the next lesson's.
+static func is_forced(chapter: Chapter) -> bool:
+	return chapter.position == 0
 
 
 ## Rereads the GPs, words, syllables and sentences, leaving the chapters as they

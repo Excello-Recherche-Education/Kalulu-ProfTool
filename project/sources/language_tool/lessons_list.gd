@@ -10,7 +10,7 @@ var lessons: Dictionary[int, LessonContainer] = {}
 
 func _ready() -> void:
 	# Every lesson, those without a GP included: one that has booklet chapters
-	# must be seen to be dealt with (see _on_save_button_pressed).
+	# must be seen, since saving it empty deletes them (see _on_save_button_pressed).
 	Database.db.query("SELECT ID, LessonNb FROM Lessons ORDER BY LessonNb")
 	for element: Dictionary in Database.db.query_result.duplicate():
 		var lesson_container: LessonContainer = lesson_container_scene.instantiate()
@@ -89,26 +89,50 @@ func _on_lesson_dropped(before: bool, number: int, dropped_number: int) -> void:
 ## Writes the lessons that have GPs, in their on-screen order, onto the Lessons
 ## rows by number -- a lesson left without GPs is dropped, as it always was --
 ## then moves every booklet chapter to the row its lesson's content now sits on,
-## so a chapter follows its lesson when lessons are dragged around. Refuses,
-## before writing anything, to drop a lesson that has chapters, or to move
-## lessons so that the chapters' booklets no longer run 1, 2, 3...
+## so a chapter follows its lesson when lessons are dragged around. A lesson
+## dropped takes its booklet chapters with it: every lesson has one, which
+## cannot be deleted otherwise, so this asks first. Refuses, before writing
+## anything, to move lessons so that the chapters' booklets no longer run 1, 2, 3...
 func _on_save_button_pressed() -> void:
 	var all_children: Array[Node] = lessons_container.get_children()
 	var chapters_by_lesson: Dictionary[int, Array] = _chapter_ids_by_lesson()
-	var stranded: PackedStringArray = []
+	var dropped: PackedStringArray = []
+	var dropped_ids: Array[int] = []
+	var dropped_chapters: int = 0
 	var children: Array[LessonContainer] = []
 	for child: LessonContainer in all_children:
 		if child.get_gp_count() > 0:
 			children.append(child)
 		elif child.lesson_id >= 0 and chapters_by_lesson.has(child.lesson_id):
-			stranded.append(str(child.number))
-	if not stranded.is_empty():
-		_show_refusal("Lessons %s have booklet chapters but no GP. Give them GPs, or move or delete their chapters in Booklet Chapters first." % ", ".join(stranded))
-		return
+			dropped.append(str(child.number))
+			dropped_ids.append(child.lesson_id)
+			dropped_chapters += chapters_by_lesson[child.lesson_id].size()
 	var booklet_problem: String = _booklet_order_problem(children)
 	if not booklet_problem.is_empty():
 		_show_refusal("Saving would put the booklets out of order: %s. Renumber the booklets in Booklet Chapters first, or move the lessons differently." % booklet_problem)
 		return
+	if dropped.is_empty():
+		_save(children, chapters_by_lesson, [])
+		return
+	var dialog: ConfirmationDialog = ConfirmationDialog.new()
+	dialog.title = "Delete booklet chapters?"
+	if dropped.size() == 1:
+		dialog.dialog_text = "Lesson %s has no GP, so it is dropped. Its %d booklet chapter(s) are deleted with it, and everything they print. Save anyway?" % [dropped[0], dropped_chapters]
+	else:
+		dialog.dialog_text = "Lessons %s have no GP, so they are dropped. Their %d booklet chapters are deleted with them, and everything they print. Save anyway?" % [", ".join(dropped), dropped_chapters]
+	dialog.ok_button_text = "Delete and save"
+	dialog.confirmed.connect(func() -> void: _save(children, chapters_by_lesson, dropped_ids))
+	add_child(dialog)
+	dialog.popup_centered()
+
+
+## The save itself, once _on_save_button_pressed() has checked it: deletes the
+## chapters of the lessons in `dropped_ids` first, which the schema requires
+## before their lessons can go (ON DELETE RESTRICT).
+func _save(children: Array[LessonContainer], chapters_by_lesson: Dictionary[int, Array], dropped_ids: Array[int]) -> void:
+	for lesson_id: int in dropped_ids:
+		Database.db.query_with_bindings("DELETE FROM BookletChapters WHERE LessonID = ?", [lesson_id])
+		chapters_by_lesson.erase(lesson_id)
 
 	Database.db.query("DELETE FROM GPsInLessons")
 	var target_ids: Dictionary[int, int] = {} # lesson row a container came from -> row it now sits on
@@ -144,7 +168,8 @@ func _on_save_button_pressed() -> void:
 	for child: LessonContainer in children:
 		child.lesson_id = target_ids.get(child.lesson_id, child.lesson_id)
 
-	# A lesson that still has chapters is not deleted (ON DELETE RESTRICT).
+	# A lesson that still has chapters is not deleted (ON DELETE RESTRICT): a
+	# lesson after the last one, with no GP and no chapter, can be.
 	Database.db.query_with_bindings("DELETE FROM Lessons WHERE LessonNb > ? AND ID NOT IN (SELECT LessonID FROM BookletChapters)", [children.size()])
 	get_tree().reload_current_scene()
 
@@ -157,7 +182,9 @@ func _booklet_order_problem(children: Array[LessonContainer]) -> String:
 		if children[index].lesson_id >= 0:
 			new_numbers[children[index].lesson_id] = index + 1
 	Database.db.query("SELECT LessonID, Position, Booklet FROM BookletChapters")
-	var chapters: Array = Database.db.query_result.duplicate()
+	# The chapters of a lesson dropped are deleted with it, so do not count.
+	var chapters: Array = Database.db.query_result.filter(func(chapter: Dictionary) -> bool:
+		return new_numbers.has(int(chapter.LessonID)))
 	chapters.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
 		var lesson_a: int = new_numbers.get(int(a.LessonID), 0)
 		var lesson_b: int = new_numbers.get(int(b.LessonID), 0)
