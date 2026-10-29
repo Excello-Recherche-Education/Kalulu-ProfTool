@@ -39,6 +39,9 @@ var reading: int = 0:
 var booklet_only: int = 0:
 	set = set_booklet_only
 var sub_elements_list: Dictionary = {}
+## Where the word as typed or loaded has its hyphens, each as the number of
+## letters before it: a hyphen is no GP, so _spelling() puts them back.
+var _hyphens: Array[int] = []
 
 @onready var word_label: Label = %Word
 @onready var graphemes_label: Label = %Graphemes
@@ -82,6 +85,7 @@ func set_booklet_only(p_booklet_only: bool) -> void:
 
 func set_word(p_word: String) -> void:
 	word = p_word
+	_hyphens = _hyphens_of(word)
 	if word_label:
 		word_label.text = word
 	if word_edit:
@@ -148,7 +152,7 @@ func add_gp_list_button(gp_id: int, ind_gp_id: int) -> void:
 func _on_gp_list_button_selected(gp_id: int, element: Node) -> void:
 	var ind_gp_id: int = int(element.get_index() / 2.0)
 	unvalidated_gp_ids[ind_gp_id] = gp_id
-	word_edit.text = get_graphemes(unvalidated_gp_ids)
+	word_edit.text = _spelling(unvalidated_gp_ids)
 
 
 func _on_gp_list_button_new_selected(element: Node) -> void:
@@ -161,6 +165,31 @@ func get_graphemes(p_gp_ids: Array[int]) -> String:
 	for gp_id: int in p_gp_ids:
 		res += sub_elements_list[gp_id].grapheme
 	return res
+
+
+## The text of a decomposition: its graphemes run together, with the hyphens
+## the word was typed with put back between them, so that choosing the GPs of
+## "tam-tam" does not make it "tamtam". One that does not fall inside the
+## letters yet is left out until it does.
+func _spelling(p_gp_ids: Array[int]) -> String:
+	var spelled: String = get_graphemes(p_gp_ids)
+	# From the last: inserting one leaves the letters before it where they were.
+	for index: int in range(_hyphens.size() - 1, -1, -1):
+		var letters: int = _hyphens[index]
+		if letters > 0 and letters < spelled.length():
+			spelled = spelled.insert(letters, "-")
+	return spelled
+
+
+static func _hyphens_of(text: String) -> Array[int]:
+	var hyphens: Array[int] = []
+	var letters: int = 0
+	for character: String in text:
+		if character == "-":
+			hyphens.append(letters)
+		else:
+			letters += 1
+	return hyphens
 
 
 func get_gps(p_gp_ids: Array[int]) -> String:
@@ -188,6 +217,7 @@ func _ready() -> void:
 	set_booklet_only(booklet_only)
 	(%WordEditLabel as Label).text = table_graph_column + ": "
 	(%GPsEditLabel as Label).text = sub_table + ": "
+	word_edit.text_changed.connect(func(text: String) -> void: _hyphens = _hyphens_of(text))
 
 
 func _on_edit_button_pressed() -> void:
@@ -380,7 +410,7 @@ func _on_remove_gp_button_2_pressed() -> void:
 	unvalidated_gp_ids.pop_back()
 	graphemes_edit_container.get_child(graphemes_edit_container.get_child_count() - 1).queue_free()
 	graphemes_edit_container.get_child(graphemes_edit_container.get_child_count() - 2).queue_free()
-	word_edit.text = get_graphemes(unvalidated_gp_ids)
+	word_edit.text = _spelling(unvalidated_gp_ids)
 
 
 func _process(_delta: float) -> void:
@@ -391,7 +421,7 @@ func _process(_delta: float) -> void:
 func new_gp_asked_added(ind: int, gp_id: int) -> void:
 	unvalidated_gp_ids[ind] = gp_id
 	set_graphemes_edit(unvalidated_gp_ids)
-	word_edit.text = get_graphemes(unvalidated_gp_ids)
+	word_edit.text = _spelling(unvalidated_gp_ids)
 
 
 func _on_add_gp_button_pressed(element: Node) -> void:

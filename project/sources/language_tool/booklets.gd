@@ -801,7 +801,7 @@ func _add_picker(chapter: BookletData.Chapter, part: int) -> void:
 		if part == BookletData.Part.WORDS:
 			# What the printed text must keep holding; a list word that is cut
 			# into several (an apostrophe) is not checked.
-			var pieces: PackedStringArray = BookletData.words_of(text)
+			var pieces: PackedStringArray = BookletData.words_of(text, data.word_ids)
 			entry.base = pieces[0] if pieces.size() == 1 else ""
 		chapter.get_entries(part).append(entry)
 		_changed()

@@ -42,7 +42,12 @@ func _add_from_additional_word_list(new_text: String) -> int:
 	var all_found: bool = true
 	words_not_founds.clear()
 	var word_ids: Array[int] = []
-	for word_element: String in new_text_clean.split(" ", false):
+	# "tam-tam" is one word when the Word List has it, "as-tu" is two.
+	var words: PackedStringArray = []
+	for token: String in new_text_clean.split(" ", false):
+		words.append_array(BookletData.hyphenated_words(token, func(word: String) -> bool:
+			return word_list_element._try_to_complete_from_word(word) >= 0))
+	for word_element: String in words:
 		var word_id: int = word_list_element._try_to_complete_from_word(word_element)
 		word_ids.append(word_id)
 		if word_id < 0:

@@ -278,7 +278,7 @@ func _pickable(table: String, column: String, lessons: Dictionary[String, int]) 
 ## Word List has ("lune" in "la Lune"), or "" when it has none.
 func base_word(text: String) -> String:
 	var base: String = ""
-	for word: String in words_of(text):
+	for word: String in words_of(text, word_ids):
 		if word_ids.has(word) and word.length() > base.length():
 			base = word
 	return base
@@ -309,9 +309,11 @@ static func holds(text: String, base: String, kind: String) -> bool:
 	if base.is_empty():
 		return false
 	if kind == "word" or kind == "syllable":
-		var pieces: PackedStringArray = words_of(base)
+		# The item is a word, so a hyphenated one stays whole: "tam-tam".
+		var itself: Dictionary = {base.to_lower(): true}
+		var pieces: PackedStringArray = words_of(base, itself)
 		if pieces.size() == 1:
-			return pieces[0] in words_of(text)
+			return pieces[0] in words_of(text, itself)
 	# On one line: a sentence edited in a one-line box loses its line breaks.
 	return normalize(base).replace("\n", " ") in normalize(text).replace("\n", " ")
 
@@ -346,7 +348,7 @@ func add_booklet_sentence(text: String) -> Dictionary:
 	# appending to result.missing in place would change nothing.
 	var linked: Array[int] = []
 	var missing: PackedStringArray = []
-	for word: String in words_of(text):
+	for word: String in words_of(text, word_ids):
 		if word_ids.has(word):
 			linked.append(word_ids[word])
 		elif not word in missing:
@@ -457,12 +459,33 @@ func find_sentence(text: String) -> int:
 	return _sentence_ids.get(normalize(text), -1)
 
 
-## The words of a booklet text, lowercased, in order.
-static func words_of(text: String) -> PackedStringArray:
+## The words of a booklet text, lowercased, in order. A hyphenated form is cut
+## by hyphenated_words(), `words` (lowercased spelling -> anything) being the
+## words it may stay whole as: the Word List's, usually.
+static func words_of(text: String, words: Dictionary = {}) -> PackedStringArray:
 	var cleaned: String = text.to_lower().replace("\n", " ").replace("\t", " ")
 	for separator: String in SEPARATORS:
 		cleaned = cleaned.replace(separator, " ")
-	return cleaned.split(" ", false)
+	var result: PackedStringArray = []
+	for token: String in cleaned.split(" ", false):
+		result.append_array(hyphenated_words(token, func(word: String) -> bool: return words.has(word)))
+	return result
+
+
+## The words a hyphenated form is: itself when `is_word` says it is one
+## ("tam-tam", "arc-en-ciel"), otherwise the words between its hyphens ("as-tu"
+## is "as" and "tu"). The euphonic t of "a-t-il" is no word and is left out.
+## The Sentence List's parser and the generator cut the same way.
+static func hyphenated_words(token: String, is_word: Callable) -> PackedStringArray:
+	if not "-" in token or is_word.call(token):
+		return PackedStringArray([token])
+	var parts: PackedStringArray = token.split("-", false)
+	var result: PackedStringArray = []
+	for index: int in range(parts.size()):
+		if parts[index] == "t" and index > 0 and index < parts.size() - 1:
+			continue
+		result.append(parts[index])
+	return result
 
 
 func sort_chapters() -> void:
@@ -677,7 +700,7 @@ func save_errors() -> PackedStringArray:
 ## hold the word it was picked from.
 static func word_entry_problem(entry: Dictionary) -> String:
 	var base: String = entry.get("base", "")
-	if base.is_empty() or base in words_of(entry.text):
+	if base.is_empty() or base in words_of(entry.text, {base.to_lower(): true}):
 		return ""
 	return "the word \"%s\" is printed as \"%s\", which no longer holds it" % [base, entry.text]
 
@@ -753,14 +776,14 @@ func problems(chapter: Chapter) -> PackedStringArray:
 			found.append_array(_text_problems(entry.text, chapter.lesson_nb, true))
 	var printed_before: Dictionary[String, bool] = _printed_before(chapter)
 	for entry: Dictionary in chapter.get_entries(Part.FLUENCY):
-		var key: String = " ".join(words_of(entry.text))
+		var key: String = " ".join(words_of(entry.text, word_ids))
 		if not printed_before.has(key):
 			found.append("Fluency \"%s\": not in an earlier chapter's lists" % entry.text)
 	for story: Dictionary in chapter.stories:
 		var unknown: PackedStringArray = []
 		var later: PackedStringArray = []
 		var seen: Dictionary[String, bool] = {}
-		for word: String in words_of(str(story.title) + " " + str(story.text)):
+		for word: String in words_of(str(story.title) + " " + str(story.text), word_ids):
 			if seen.has(word):
 				continue
 			seen[word] = true
@@ -778,7 +801,7 @@ func problems(chapter: Chapter) -> PackedStringArray:
 
 func _text_problems(text: String, lesson_nb: int, syllables_too: bool) -> PackedStringArray:
 	var found: PackedStringArray = []
-	for word: String in words_of(text):
+	for word: String in words_of(text, word_ids):
 		var lesson: int = word_lessons.get(word, -2)
 		if lesson == -2 and syllables_too:
 			lesson = syllable_lessons.get(word, -2)
@@ -806,8 +829,8 @@ func _printed_before(chapter: Chapter) -> Dictionary[String, bool]:
 			break
 		for part: int in [Part.SYLLABLES, Part.WORDS, Part.WRITING]:
 			for entry: Dictionary in other.get_entries(part):
-				printed[" ".join(words_of(entry.text))] = true
-				for word: String in words_of(entry.text):
+				printed[" ".join(words_of(entry.text, word_ids))] = true
+				for word: String in words_of(entry.text, word_ids):
 					printed[word] = true
 	return printed
 
