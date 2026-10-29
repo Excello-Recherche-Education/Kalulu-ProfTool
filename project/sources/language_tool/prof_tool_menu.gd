@@ -8,6 +8,9 @@ enum FileCheckResult {
 
 const BASE_PATH: String = "user://language_resources/"
 const MODEL_DATABASE_PATH: String = "res://model_database.db"
+## The CSV lists packs used to carry beside language.db, which a Save deletes
+## from the local copy (see _write_generated_files()).
+const OBSOLETE_LISTS: PackedStringArray = ["gp_list.csv", "words_list.csv", "syllables_list.csv", "sentences_list.csv"]
 
 var save_file: ProfToolSave
 # The integrity check's own state. It lives down in its region, but its
@@ -169,8 +172,10 @@ func _pack_refusals() -> PackedStringArray:
 	return refusals
 
 
-## The files a saved pack carries besides its database and media: version.txt,
-## summary.txt and the four CSV lists, written into the local copy of the pack.
+## The files a saved pack carries besides its database and media: version.txt
+## and summary.txt, written into the local copy of the pack. The CSV lists it
+## used to carry are deleted from that copy, so the Save does not copy them back
+## into a pack: nothing read them, and language.db holds the same data.
 func _write_generated_files() -> void:
 	_normalize_lesson_ids_before_export()
 
@@ -203,10 +208,10 @@ func _write_generated_files() -> void:
 		summary_file.store_line("\n\n")
 	summary_file.close()
 	
-	_create_gp_csv()
-	_create_words_csv()
-	_create_syllable_csv()
-	_create_sentence_csv()
+	for file_name: String in OBSOLETE_LISTS:
+		var path: String = BASE_PATH.path_join(Database.language).path_join(file_name)
+		if FileAccess.file_exists(path):
+			DirAccess.remove_absolute(path)
 
 
 # Forces lessons to have a lessonID corresponding to the lesson number, to avoid confusion in game requests
@@ -707,113 +712,6 @@ func _on_language_database_selected(file_path: String) -> void:
 	save_file.pack_folders[language] = source
 	save_file.save()
 	get_tree().reload_current_scene()
-
-
-func _create_gp_csv() -> void:
-	var gp_list_file: FileAccess = FileAccess.open(BASE_PATH.path_join(Database.language).path_join("gp_list.csv"), FileAccess.WRITE)
-	gp_list_file.store_csv_line(["Grapheme", "Phoneme", "Type", "Exception"])
-	var query: String = "Select * FROM GPs ORDER BY GPs.Grapheme"
-	Database.db.query(query)
-	var result: Array[Dictionary] = Database.db.query_result
-	var types_text: Array[String] = ["Silent", "Vowel", "Consonant"]
-	for element: Dictionary in result:
-		gp_list_file.store_csv_line([element.Grapheme, element.Phoneme, types_text[element.Type], element.Exception])
-
-
-func _create_words_csv() -> void:
-	var gp_list_file: FileAccess = FileAccess.open(BASE_PATH.path_join(Database.language).path_join("words_list.csv"), FileAccess.WRITE)
-	gp_list_file.store_csv_line(["ORTHO", "GPMATCH", "LESSON", "READING", "BOOKLET_ONLY"])
-	var query: String = "SELECT Words.ID as WordId, Word, group_concat(Grapheme, ' ') as Graphemes, group_concat(Phoneme, ' ') as Phonemes, group_concat(GPs.ID, ' ') as GPIDs, Words.Exception, Reading, BookletOnly 
-			FROM Words 
-			INNER JOIN ( SELECT * FROM GPsInWords ORDER BY GPsInWords.Position ) GPsInWords ON Words.ID = GPsInWords.WordID 
-			INNER JOIN GPs ON GPs.ID = GPsInWords.GPID
-			GROUP BY Words.ID
-			UNION ALL
-			SELECT ID, Word, '', '', '', Exception, Reading, BookletOnly FROM Words WHERE ID NOT IN ( SELECT WordID FROM GPsInWords )"
-	Database.db.query(query)
-	var result: Array[Dictionary] = Database.db.query_result
-	for element: Dictionary in result:
-		# An entry with no decomposition is written too, as "()" in lesson -1, so the
-		# CSV lists everything the database holds.
-		if (element.GPIDs as String).is_empty():
-			gp_list_file.store_csv_line([element["Word"], "()", -1, element.Reading, element.BookletOnly])
-			continue
-		var gpmatch: String = "("
-		var graphemes: PackedStringArray = (element.Graphemes as String).split(" ")
-		var phonemes: PackedStringArray = (element.Phonemes as String).split(" ")
-		for index: int in range(graphemes.size() - 1):
-			gpmatch += graphemes[index] + "-" + phonemes[index] + "."
-		var last_index: int = graphemes.size() - 1
-		gpmatch += graphemes[last_index] + "-" + phonemes[last_index] + ")"
-		var lesson: int = -1
-		for gp_id: String in (element.GPIDs as String).split(' '):
-			var gp_id_lesson: int = Database.get_min_lesson_for_gp_id(int(gp_id))
-			if gp_id_lesson < 0:
-				lesson = -1
-				break
-			lesson = maxi(lesson, gp_id_lesson)
-		gp_list_file.store_csv_line([element.Word, gpmatch, lesson, element.Reading, element.BookletOnly])
-
-
-func _create_syllable_csv() -> void:
-	var gp_list_file: FileAccess = FileAccess.open(BASE_PATH.path_join(Database.language).path_join("syllables_list.csv"), FileAccess.WRITE)
-	gp_list_file.store_csv_line(["ORTHO", "GPMATCH", "LESSON", "READING", "BOOKLET_ONLY"])
-	var query: String = "SELECT Syllables.ID as SyllableId, Syllable, group_concat(Grapheme, ' ') as Graphemes, group_concat(Phoneme, ' ') as Phonemes, group_concat(GPs.ID, ' ') as GPIDs, Syllables.Exception, Reading, BookletOnly 
-			FROM Syllables 
-			INNER JOIN ( SELECT * FROM GPsInSyllables ORDER BY GPsInSyllables.Position ) GPsInSyllables ON Syllables.ID = GPsInSyllables.SyllableID 
-			INNER JOIN GPs ON GPs.ID = GPsInSyllables.GPID
-			GROUP BY Syllables.ID
-			UNION ALL
-			SELECT ID, Syllable, '', '', '', Exception, Reading, BookletOnly FROM Syllables WHERE ID NOT IN ( SELECT SyllableID FROM GPsInSyllables )"
-	Database.db.query(query)
-	var result: Array[Dictionary] = Database.db.query_result
-	for element: Dictionary in result:
-		# An entry with no decomposition is written too, as "()" in lesson -1, so the
-		# CSV lists everything the database holds.
-		if (element.GPIDs as String).is_empty():
-			gp_list_file.store_csv_line([element["Syllable"], "()", -1, element.Reading, element.BookletOnly])
-			continue
-		var gpmatch: String = "("
-		var graphemes: PackedStringArray = (element.Graphemes as String).split(" ")
-		var phonemes: PackedStringArray = (element.Phonemes as String).split(" ")
-		for index: int in range(graphemes.size() - 1):
-			gpmatch += graphemes[index] + "-" + phonemes[index] + "."
-		var last_index: int = graphemes.size() - 1
-		gpmatch += graphemes[last_index] + "-" + phonemes[last_index] + ")"
-		var lesson: int = -1
-		for gp_id: String in (element.GPIDs as String).split(' '):
-			var gp_id_lesson: int = Database.get_min_lesson_for_gp_id(int(gp_id))
-			if gp_id_lesson < 0:
-				lesson = -1
-				break
-			lesson = maxi(lesson, gp_id_lesson)
-		gp_list_file.store_csv_line([element.Syllable, gpmatch, lesson, element.Reading, element.BookletOnly])
-
-
-func _create_sentence_csv() -> void:
-	var gp_list_file: FileAccess = FileAccess.open(BASE_PATH.path_join(Database.language).path_join("sentences_list.csv"), FileAccess.WRITE)
-	gp_list_file.store_csv_line(["Sentence", "Lesson", "BookletOnly"])
-	var query: String = "SELECT Sentences.ID as SentenceId, Sentence, group_concat(Word, ' ') as Words, group_concat(Words.ID, ' ') as WordIDs, Sentences.Exception, Sentences.BookletOnly 
-			FROM Sentences 
-			INNER JOIN ( SELECT * FROM WordsInSentences ORDER BY WordsInSentences.Position ) WordsInSentences ON Sentences.ID = WordsInSentences.SentenceID 
-			INNER JOIN Words ON Words.ID = WordsInSentences.WordID
-			GROUP BY Sentences.ID
-			UNION ALL
-			SELECT ID, Sentence, '', '', Exception, BookletOnly FROM Sentences WHERE ID NOT IN ( SELECT SentenceID FROM WordsInSentences )"
-	Database.db.query(query)
-	var result: Array[Dictionary] = Database.db.query_result
-	for element: Dictionary in result:
-		var lesson: int = -1
-		if (element.WordIDs as String).is_empty():
-			gp_list_file.store_csv_line([element.Sentence, lesson, element.BookletOnly])
-			continue
-		for word_id: String in (element.WordIDs as String).split(' '):
-			var ind: int = Database.get_min_lesson_for_word_id(int(word_id))
-			if ind < 0:
-				lesson = -1
-				break
-			lesson = maxi(lesson, ind)
-		gp_list_file.store_csv_line([element.Sentence, lesson, element.BookletOnly])
 
 
 func _on_open_folder_button_pressed() -> void:
