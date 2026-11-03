@@ -12,6 +12,8 @@ const MENU_SCENE: String = "res://sources/language_tool/prof_tool_menu.tscn"
 const WARNING_COLOR: Color = Color(1.0, 0.6, 0.1)
 const TEXT_SIZE: int = 36
 const HEADING_SIZE: int = 48
+## The side of a picture's thumbnail, in the list of pictures and in a chapter.
+const THUMBNAIL_SIZE: int = 160
 
 ## Most matches a search box lists; typing more narrows them.
 const MATCHES_SHOWN: int = 60
@@ -43,6 +45,9 @@ var _font_dialog: FileDialog
 var _font_options: Array[OptionButton] = []
 ## Font file path -> the font loaded from it for a preview, null when it cannot be.
 var _loaded_fonts: Dictionary[String, FontFile] = {}
+var _image_dialog: FileDialog
+## Picture file path -> its thumbnail, null when it cannot be read.
+var _thumbnails: Dictionary[String, Texture2D] = {}
 
 
 func _ready() -> void:
@@ -371,6 +376,7 @@ func _show_settings() -> void:
 			data.settings[column] = value
 			_changed()))
 	_show_fonts()
+	_show_images()
 
 
 func _show_chapter(chapter: BookletData.Chapter) -> void:
@@ -415,8 +421,8 @@ func _show_chapter(chapter: BookletData.Chapter) -> void:
 	_heading("What the chapter teaches")
 	_editor.add_child(_label("Its automatic syllables and words contain at least one of these GPs."))
 	_editor.add_child(_gp_checkboxes(chapter))
-	_editor.add_child(_label("Teacher's booklet picture"))
-	_editor.add_child(_image_picker(chapter))
+	_editor.add_child(_label("Teacher's booklet picture: the Look & Learn image of one of its GPs, or one of the pack's own pictures (Language settings > Booklet images), for a sound that has no image of its own."))
+	_add_image_picker(chapter)
 
 	_heading("Own settings")
 	_editor.add_child(_label("Ticked: this chapter's own value. Unticked: the language's."))
@@ -499,22 +505,66 @@ func _gp_checkboxes(chapter: BookletData.Chapter) -> HFlowContainer:
 	return flow
 
 
-func _image_picker(chapter: BookletData.Chapter) -> OptionButton:
+## The chapter's picture in the teacher's booklet: none, the Look & Learn image
+## of a GP, or one of the pack's own pictures. One list for both, so choosing one
+## clears the other and a chapter never names two (rule 8); below it, the
+## picture in use.
+func _add_image_picker(chapter: BookletData.Chapter) -> void:
 	var picker: OptionButton = _option_button()
-	picker.add_item("No teacher page", -1)
+	picker.add_item("No teacher page")
+	picker.set_item_metadata(0, {})
 	var candidates: Array[int] = chapter.gp_ids.duplicate()
 	if chapter.image_gp_id >= 0 and not chapter.image_gp_id in candidates:
 		candidates.append(chapter.image_gp_id)
+	var selected: int = 0
 	for gp_id: int in candidates:
 		var name: String = "Look & Learn image of " + data.gp_name(gp_id)
 		if not data.has_image(gp_id):
 			name += " (missing from the pack)"
-		picker.add_item(name, gp_id)
-	picker.select(maxi(picker.get_item_index(chapter.image_gp_id), 0))
+		picker.add_item(name)
+		picker.set_item_metadata(picker.item_count - 1, {gp = gp_id})
+		if chapter.image == null and gp_id == chapter.image_gp_id:
+			selected = picker.item_count - 1
+	for image: BookletData.BookletImage in data.images:
+		picker.add_item("Booklet image \"%s\" (%s/%s)" % [image.name, BookletData.IMAGES_FOLDER, image.file])
+		picker.set_item_metadata(picker.item_count - 1, {image = image})
+		if image == chapter.image:
+			selected = picker.item_count - 1
+	picker.select(selected)
+	_editor.add_child(picker)
+	var in_use: HBoxContainer = HBoxContainer.new()
+	in_use.add_theme_constant_override("separation", 20)
+	_editor.add_child(in_use)
+	_show_picture_in_use(chapter, in_use)
 	picker.item_selected.connect(func(index: int) -> void:
-		chapter.image_gp_id = picker.get_item_id(index)
-		_changed())
-	return picker
+		var choice: Dictionary = picker.get_item_metadata(index)
+		chapter.image_gp_id = int(choice.get("gp", -1))
+		chapter.image = choice.get("image", null)
+		_changed()
+		_show_picture_in_use(chapter, in_use))
+
+
+## What the teacher's booklet shows before a chapter, with its thumbnail.
+func _show_picture_in_use(chapter: BookletData.Chapter, row: HBoxContainer) -> void:
+	_clear_children(row)
+	var path: String = ""
+	var text: String = "No picture: this chapter has no page in the teacher's booklet."
+	if chapter.image != null:
+		path = BookletData.image_path(chapter.image)
+		text = "Shows the booklet image \"%s\", %s/%s." % [chapter.image.name, BookletData.IMAGES_FOLDER, chapter.image.file]
+	elif chapter.image_gp_id >= 0:
+		path = data.gp_image_path(chapter.image_gp_id)
+		text = "Shows the Look & Learn image of %s." % data.gp_name(chapter.image_gp_id)
+		if path.is_empty():
+			text += " The pack has no such image: nothing is printed."
+	if data.images.is_empty():
+		text += " The pack has no picture of its own: add one in Language settings > Booklet images."
+	if not path.is_empty():
+		row.add_child(_thumbnail(path))
+	var label: Label = _label(text)
+	# Wrapped beside the thumbnail, so given the rest of the row.
+	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(label)
 
 
 func _add_override_row(grid: GridContainer, chapter: BookletData.Chapter, column: String) -> void:
@@ -760,6 +810,118 @@ func _on_font_file_selected(path: String) -> void:
 		return
 	_changed()
 	_show_settings()
+
+#endregion
+
+#region Booklet images
+
+## The Booklet images part of the language settings: the pack's own pictures,
+## each a file of its booklet_images/ folder, that a chapter can show in the
+## teacher's booklet instead of a Look & Learn image.
+func _show_images() -> void:
+	_heading("Booklet images")
+	_editor.add_child(_label("Pictures of the pack's own, for a chapter whose sound has no Look & Learn image (the French \"ui\" shows a well). Each is a PNG or JPEG file of the pack's %s folder; a chapter shows one when it is chosen as its teacher's booklet picture. Add copies the file you pick into that folder at once; Save copies the folder into the pack with the rest." % BookletData.IMAGES_FOLDER))
+	_editor.add_child(_label("Where each picture comes from and under what licence goes in %s/%s, beside it: the language packs are public. Write it in the Prof Tool's copy (the button below opens it), since saving the pack copies that one over the pack's." % [BookletData.IMAGES_FOLDER, BookletData.IMAGES_LICENSE]))
+
+	for image: BookletData.BookletImage in data.images:
+		var row: HBoxContainer = HBoxContainer.new()
+		row.add_theme_constant_override("separation", 20)
+		_editor.add_child(row)
+		row.add_child(_thumbnail(BookletData.image_path(image)))
+		var image_name: LineEdit = LineEdit.new()
+		image_name.text = image.name
+		image_name.custom_minimum_size.x = 500
+		image_name.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		image_name.add_theme_font_size_override("font_size", TEXT_SIZE)
+		image_name.text_changed.connect(func(text: String) -> void:
+			image.name = text.strip_edges()
+			_changed())
+		row.add_child(image_name)
+		var file: Label = _label("%s/%s" % [BookletData.IMAGES_FOLDER, image.file], TEXT_SIZE, false)
+		file.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		file.clip_text = true
+		row.add_child(file)
+		var remove: Button = _button("Remove", func() -> void:
+			data.remove_image(image)
+			_changed()
+			_show_settings())
+		remove.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		row.add_child(remove)
+		var notes: PackedStringArray = []
+		var showing: Array[BookletData.Chapter] = data.chapters_showing(image)
+		if showing.is_empty():
+			notes.append("No chapter shows it.")
+		else:
+			notes.append("Shown by %s." % ", ".join(PackedStringArray(showing.map(
+					func(chapter: BookletData.Chapter) -> String: return data.chapter_name(chapter)))))
+		_editor.add_child(_label("    " + " ".join(notes)))
+		if not FileAccess.file_exists(BookletData.image_path(image)):
+			_editor.add_child(_warning_label("    %s/%s is missing from the pack: Save refuses it." % [BookletData.IMAGES_FOLDER, image.file]))
+		elif not BookletData.image_has_license(image):
+			_editor.add_child(_warning_label("    %s/%s does not list `%s`: say where it comes from and its licence there." % [
+					BookletData.IMAGES_FOLDER, BookletData.IMAGES_LICENSE, image.file.get_file()]))
+
+	var buttons: HBoxContainer = HBoxContainer.new()
+	buttons.add_theme_constant_override("separation", 20)
+	_editor.add_child(buttons)
+	buttons.add_child(_button("Add image...", _on_add_image_pressed))
+	buttons.add_child(_button("Open %s/%s" % [BookletData.IMAGES_FOLDER, BookletData.IMAGES_LICENSE], _on_open_image_license_pressed))
+	_editor.add_child(_label("Remove takes a picture off this list, and the chapters showing it lose their picture. Its file stays in %s, here and in the pack: nothing deletes files from a pack. Delete it from the Kalulu-Languages checkout by hand, with its line in %s, if no chapter needs it any more." % [BookletData.IMAGES_FOLDER, BookletData.IMAGES_LICENSE]))
+
+
+## A picture shown small, keeping its proportions; an empty square when the
+## file cannot be read.
+func _thumbnail(path: String) -> TextureRect:
+	if not _thumbnails.has(path):
+		var texture: Texture2D = null
+		var image: Image = BookletData.load_picture(path) if FileAccess.file_exists(path) else null
+		if image != null:
+			texture = ImageTexture.create_from_image(image)
+		_thumbnails[path] = texture
+	var rect: TextureRect = TextureRect.new()
+	rect.texture = _thumbnails[path]
+	rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	rect.custom_minimum_size = Vector2(THUMBNAIL_SIZE, THUMBNAIL_SIZE)
+	return rect
+
+
+func _on_add_image_pressed() -> void:
+	if _image_dialog == null:
+		_image_dialog = FileDialog.new()
+		_image_dialog.title = "Add a booklet image"
+		_image_dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
+		_image_dialog.access = FileDialog.ACCESS_FILESYSTEM
+		_image_dialog.filters = PackedStringArray(["*.png, *.jpg, *.jpeg ; PNG or JPEG pictures"])
+		_image_dialog.size = Vector2i(1500, 1000)
+		_image_dialog.file_selected.connect(_on_image_file_selected)
+		add_child(_image_dialog)
+	_image_dialog.popup_centered()
+
+
+func _on_image_file_selected(path: String) -> void:
+	var result: Dictionary = data.add_image(path)
+	if result.image == null:
+		_status.text = "Not added: " + str(result.error)
+		return
+	_changed()
+	_show_settings()
+	_status.text = "%s is in the pack's %s folder now; Save to list it. Then say where it comes from in %s." % [
+			path.get_file(), BookletData.IMAGES_FOLDER, BookletData.IMAGES_LICENSE]
+
+
+## Opens the local copy's booklet_images/LICENSE.md, the one Save copies into the
+## pack; its folder when the pack has none yet.
+func _on_open_image_license_pressed() -> void:
+	var folder: String = ProjectSettings.globalize_path(BookletData.images_folder())
+	var record: String = folder.path_join(BookletData.IMAGES_LICENSE)
+	if FileAccess.file_exists(record):
+		OS.shell_open(record)
+	elif DirAccess.dir_exists_absolute(folder):
+		_status.text = "This pack has no %s yet: create it in the folder just opened." % BookletData.IMAGES_LICENSE
+		OS.shell_show_in_file_manager(folder)
+	else:
+		_status.text = "This pack has no %s folder yet: add a picture first." % BookletData.IMAGES_FOLDER
 
 #endregion
 

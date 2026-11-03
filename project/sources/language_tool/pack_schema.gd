@@ -3,8 +3,8 @@ extends RefCounted
 ## Brings a language pack's database to the schema this Prof Tool writes, once,
 ## when the pack is opened.
 ##
-## The schema is version 4 of Kalulu-Languages' SCHEMA.md (exactly
-## schema/v4.sql there), and a database says which version it follows in
+## The schema is version 5 of Kalulu-Languages' SCHEMA.md (exactly
+## schema/v5.sql there), and a database says which version it follows in
 ## PRAGMA user_version. Before this, four screens each patched the parts they
 ## needed whenever they opened -- the word, syllable and sentence lists added
 ## Reading / Writing, Lesson Exercises dropped foreign keys and rewrote
@@ -15,7 +15,7 @@ extends RefCounted
 ## A pack is upgraded on the copy being edited, so the next save carries it.
 ## A pack newer than this Prof Tool knows is refused rather than guessed at.
 
-const VERSION: int = 4
+const VERSION: int = 5
 
 const LESSONS_EXERCISES_V1: String = """CREATE TABLE "%s" (
 	"ID"	INTEGER NOT NULL UNIQUE,
@@ -118,6 +118,14 @@ const BOOKLET_FONTS_V3: String = """CREATE TABLE "BookletFonts" (
 	PRIMARY KEY("ID" AUTOINCREMENT)
 )"""
 const FONT_COLUMNS_V3: PackedStringArray = ["ScriptFontID", "ScriptBoldFontID", "ScriptBlackFontID", "CursiveFontID"]
+## The booklets' own pictures, as in schema/v5.sql: the table, and the
+## BookletChapters column naming the one a chapter shows.
+const BOOKLET_IMAGES_V5: String = """CREATE TABLE "BookletImages" (
+	"ID"	INTEGER NOT NULL UNIQUE,
+	"Name"	TEXT NOT NULL UNIQUE,
+	"File"	TEXT NOT NULL UNIQUE,
+	PRIMARY KEY("ID" AUTOINCREMENT)
+)"""
 
 
 ## Upgrades the open database to VERSION when it is older, and keeps
@@ -141,6 +149,10 @@ static func upgrade(db: SQLite) -> String:
 			return error
 	if version < 4:
 		var error: String = _to_v4(db)
+		if not error.is_empty():
+			return error
+	if version < 5:
+		var error: String = _to_v5(db)
 		if not error.is_empty():
 			return error
 	if version < VERSION:
@@ -306,6 +318,31 @@ static func _to_v4(db: SQLite) -> String:
 			return message
 	if not db.query("COMMIT"):
 		var message: String = "Could not bring this language pack to schema version 4: %s" % db.get_error_message()
+		db.query("ROLLBACK")
+		Log.error("PackSchema: %s" % message)
+		return message
+	return ""
+
+
+## Version 4 to 5, for the booklets' own pictures: the empty BookletImages table
+## and the BookletChapters ImageID column, NULL so every chapter keeps the
+## picture its ImageGPID gives it -- what Kalulu-Languages' schema/v4-to-v5.sql
+## does. In one transaction; each part is skipped when already there.
+static func _to_v5(db: SQLite) -> String:
+	var steps: Array[String] = ["BEGIN TRANSACTION"]
+	if not _table_exists(db, "BookletImages"):
+		steps.append(BOOKLET_IMAGES_V5)
+	if not "ImageID" in _columns(db, "BookletChapters"):
+		steps.append('ALTER TABLE "BookletChapters" ADD COLUMN "ImageID" INTEGER REFERENCES "BookletImages"("ID") ON UPDATE CASCADE ON DELETE SET NULL')
+	steps.append("PRAGMA user_version = 5")
+	for step: String in steps:
+		if not db.query(step):
+			var message: String = "Could not bring this language pack to schema version 5: %s" % db.get_error_message()
+			db.query("ROLLBACK")
+			Log.error("PackSchema: %s (step: %s)" % [message, step.left(80)])
+			return message
+	if not db.query("COMMIT"):
+		var message: String = "Could not bring this language pack to schema version 5: %s" % db.get_error_message()
 		db.query("ROLLBACK")
 		Log.error("PackSchema: %s" % message)
 		return message
