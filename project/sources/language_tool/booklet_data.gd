@@ -55,6 +55,13 @@ const FONT_ROLES: Dictionary[String, Array] = {
 ## What a font file must end with to be printed: TrueType or OpenType.
 const FONT_EXTENSIONS: PackedStringArray = ["ttf", "otf"]
 
+## The pack's folder of pictures of its own (BookletImages), beside language.db,
+## and the record in it of where each comes from and under what licence.
+const IMAGES_FOLDER: String = "booklet_images"
+const IMAGES_LICENSE: String = "LICENSE.md"
+## What a picture file must end with to be printed: PNG or JPEG.
+const IMAGE_EXTENSIONS: PackedStringArray = ["png", "jpg", "jpeg"]
+
 ## How the Booklets screen shows a line break that is part of a sentence.
 const LINE_BREAK: String = "⏎"
 ## Characters a booklet text is cut into words at, besides spaces: the Prof Tool's
@@ -70,8 +77,11 @@ class Chapter:
 	var position: int = 0
 	var booklet: int = 1
 	var title: String = ""
-	## -1 for none: the chapter has no page in the teacher's booklet.
+	## The teacher's booklet picture: the Look & Learn image of this GP, or one
+	## of the pack's own pictures; at most one of the two (rule 8). -1 and null
+	## for neither: the chapter has no page in the teacher's booklet.
 	var image_gp_id: int = -1
+	var image: BookletImage = null
 	var grey_silent: bool = false
 	## Column of SETTINGS -> its value; a column absent here is NULL, the default.
 	var overrides: Dictionary[String, float] = {}
@@ -97,12 +107,22 @@ class BookletFont:
 	var name: String = ""
 	var file: String = ""
 
+## A picture of the pack's own a chapter can show in the teacher's booklet
+## instead of a Look & Learn image: a file of the pack's booklet_images/ folder,
+## named by its path there.
+class BookletImage:
+	var id: int = -1
+	var name: String = ""
+	var file: String = ""
+
 ## BookletSettings: column -> value, Cursive included.
 var settings: Dictionary[String, float] = {}
 ## BookletFonts, in the order they were added.
 var fonts: Array[BookletFont] = []
 ## FONT_ROLES column -> the font replacing that default one; absent keeps it.
 var font_choices: Dictionary[String, BookletFont] = {}
+## BookletImages, in the order they were added.
+var images: Array[BookletImage] = []
 var chapters: Array[Chapter] = []
 ## The lessons that had no chapter, whose forced chapter load_from_database()
 ## made: not in the pack until they are saved.
@@ -156,6 +176,17 @@ func load_from_database() -> void:
 		fonts.append(font)
 		fonts_by_id[font.id] = font
 
+	images.clear()
+	var images_by_id: Dictionary[int, BookletImage] = {}
+	db.query("SELECT ID, Name, File FROM BookletImages ORDER BY ID")
+	for row: Dictionary in db.query_result:
+		var image: BookletImage = BookletImage.new()
+		image.id = int(row.ID)
+		image.name = str(row.Name)
+		image.file = str(row.File)
+		images.append(image)
+		images_by_id[image.id] = image
+
 	settings.clear()
 	font_choices.clear()
 	db.query("SELECT * FROM BookletSettings ORDER BY ID LIMIT 1")
@@ -179,6 +210,8 @@ func load_from_database() -> void:
 		chapter.booklet = int(row.Booklet)
 		chapter.title = str(row.Title)
 		chapter.image_gp_id = -1 if row.ImageGPID == null else int(row.ImageGPID)
+		if row.ImageID != null:
+			chapter.image = images_by_id.get(int(row.ImageID), null)
 		chapter.grey_silent = int(row.GreySilent) != 0
 		for column: String in SETTINGS:
 			if row[column] != null:
@@ -573,7 +606,15 @@ func first_gp_with_image(gp_ids: Array[int]) -> int:
 
 
 func has_image(gp_id: int) -> bool:
-	return not Database.find_gp_asset_files(gps[gp_id], Database.LOOK_AND_LEARN_IMAGES, Database.IMAGE_EXTENSION).is_empty()
+	return not gp_image_path(gp_id).is_empty()
+
+
+## The Look & Learn image file of a GP in the local copy, or "" when it has none.
+func gp_image_path(gp_id: int) -> String:
+	if not gps.has(gp_id):
+		return ""
+	var files: PackedStringArray = Database.find_gp_asset_files(gps[gp_id], Database.LOOK_AND_LEARN_IMAGES, Database.IMAGE_EXTENSION)
+	return files[0] if not files.is_empty() else ""
 
 
 func gp_name(gp_id: int) -> String:
@@ -669,6 +710,116 @@ func pack_characters() -> PackedStringArray:
 
 #endregion
 
+#region Pictures of the pack's own
+
+## The open pack's booklet_images/ folder, in the local copy the Prof Tool
+## edits: Save copies it into the pack with everything else.
+static func images_folder() -> String:
+	return Database.get_language_folder().path_join(IMAGES_FOLDER)
+
+
+## Where an image's file is in the local copy.
+static func image_path(image: BookletImage) -> String:
+	return images_folder().path_join(image.file)
+
+
+## A picture added from a file anywhere on disk: copied into the pack's
+## booklet_images/ under its own name, at once, and listed under its name
+## without the extension, which can be edited. Refused when it is no PNG or JPEG
+## picture, when a picture of the list already has that file, or when the folder
+## already holds a different file of that name; a file the folder already holds
+## (one removed from the list, which leaves the file) is listed again, not copied.
+## Returns {image, error}: the new image, or why it was not added.
+func add_image(path: String) -> Dictionary:
+	var file: String = path.get_file()
+	if not path.get_extension().to_lower() in IMAGE_EXTENSIONS:
+		return {image = null, error = "%s is not a .png, .jpg or .jpeg picture." % file}
+	if load_picture(path) == null:
+		return {image = null, error = "%s is not a PNG or JPEG picture this Prof Tool can read." % file}
+	for image: BookletImage in images:
+		# Lowercased: macOS and Windows take Puits.png and puits.png for one file.
+		if image.file.to_lower() == file.to_lower():
+			return {image = null, error = "%s/%s is already added, as \"%s\"." % [IMAGES_FOLDER, image.file, image.name]}
+	var source: String = ProjectSettings.globalize_path(path).simplify_path()
+	var destination: String = ProjectSettings.globalize_path(images_folder().path_join(file)).simplify_path()
+	if FileAccess.file_exists(destination):
+		if source != destination and FileAccess.get_md5(source) != FileAccess.get_md5(destination):
+			return {image = null, error = "this pack's %s folder already has a different %s. Rename the file you picked, then add it." % [IMAGES_FOLDER, file]}
+	else:
+		var error: Error = DirAccess.make_dir_recursive_absolute(destination.get_base_dir())
+		if error == OK:
+			error = DirAccess.copy_absolute(source, destination)
+		if error != OK:
+			Log.error("BookletData: cannot copy %s to %s: %s" % [source, destination, error_string(error)])
+			return {image = null, error = "%s could not be copied into the pack (%s)." % [file, error_string(error)]}
+	var image: BookletImage = BookletImage.new()
+	image.file = file
+	image.name = unique_image_name(file.get_basename())
+	images.append(image)
+	return {image = image, error = ""}
+
+
+## The PNG or JPEG picture in a file, told apart by how the file starts, as the
+## validator does, not by its extension; null when it is neither, or damaged.
+## Checked before decoding, so a file that is no picture is refused without the
+## engine's errors in the log.
+static func load_picture(path: String) -> Image:
+	var bytes: PackedByteArray = FileAccess.get_file_as_bytes(path)
+	var image: Image = Image.new()
+	var error: Error = FAILED
+	if bytes.slice(0, 8) == PackedByteArray([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]):
+		error = image.load_png_from_buffer(bytes)
+	elif bytes.slice(0, 3) == PackedByteArray([0xFF, 0xD8, 0xFF]):
+		error = image.load_jpg_from_buffer(bytes)
+	return image if error == OK else null
+
+
+## Removes a picture from the list; the chapters that showed it have no picture
+## any more, as ON DELETE SET NULL leaves them. Its file stays in booklet_images/.
+func remove_image(image: BookletImage) -> void:
+	images.erase(image)
+	for chapter: Chapter in chapters:
+		if chapter.image == image:
+			chapter.image = null
+
+
+## The chapters that show a picture, in their order.
+func chapters_showing(image: BookletImage) -> Array[Chapter]:
+	var showing: Array[Chapter] = []
+	for chapter: Chapter in chapters:
+		if chapter.image == image:
+			showing.append(chapter)
+	return showing
+
+
+## Whether booklet_images/LICENSE.md lists a picture, as the validator looks for
+## it: its file name between backquotes (rule 10, a warning only).
+static func image_has_license(image: BookletImage) -> bool:
+	var record: String = images_folder().path_join(IMAGES_LICENSE)
+	if not FileAccess.file_exists(record):
+		return false
+	return ("`%s`" % image.file.get_file()) in FileAccess.get_file_as_string(record)
+
+
+## name, or name followed by a number when another picture already has it.
+func unique_image_name(wanted: String, ignored: BookletImage = null) -> String:
+	var base: String = wanted.strip_edges()
+	var candidate: String = base
+	var number: int = 2
+	while _image_named(candidate, ignored) != null:
+		candidate = "%s %d" % [base, number]
+		number += 1
+	return candidate
+
+
+func _image_named(image_name: String, ignored: BookletImage) -> BookletImage:
+	for image: BookletImage in images:
+		if image != ignored and image.name == image_name:
+			return image
+	return null
+
+#endregion
+
 #region What a chapter prints that its lesson cannot read
 
 ## What would make the booklet tables unreadable (SCHEMA.md rule 8), one line
@@ -686,6 +837,15 @@ func save_errors() -> PackedStringArray:
 		elif names.has(font.name):
 			errors.append("Two fonts are called \"%s\"" % font.name)
 		names[font.name] = true
+	var image_names: Dictionary[String, bool] = {}
+	for image: BookletImage in images:
+		if image.name.strip_edges().is_empty():
+			errors.append("The booklet image %s/%s has no name" % [IMAGES_FOLDER, image.file])
+		elif image_names.has(image.name):
+			errors.append("Two booklet images are called \"%s\"" % image.name)
+		image_names[image.name] = true
+		if not FileAccess.file_exists(image_path(image)):
+			errors.append("The booklet image \"%s\" is not in the pack: %s/%s is missing" % [image.name, IMAGES_FOLDER, image.file])
 	var previous: Chapter = null
 	for chapter: Chapter in chapters:
 		var allowed: Array[int] = [1]
@@ -695,6 +855,9 @@ func save_errors() -> PackedStringArray:
 			errors.append("%s is in booklet %d, but must be in booklet %s" % [
 					chapter_name(chapter), chapter.booklet, " or ".join(PackedStringArray(allowed.map(func(number: int) -> String: return str(number))))])
 		previous = chapter
+		if chapter.image != null and chapter.image_gp_id >= 0:
+			errors.append("%s shows both the booklet image \"%s\" and the Look & Learn image of %s: choose one" % [
+					chapter_name(chapter), chapter.image.name, gp_name(chapter.image_gp_id)])
 		for entry: Dictionary in chapter.get_entries(Part.WORDS):
 			var problem: String = word_entry_problem(entry)
 			if not problem.is_empty():
@@ -864,14 +1027,21 @@ func save_to_database() -> String:
 	for font: BookletFont in fonts:
 		if font.id < 0:
 			new_fonts.append(font)
+	var new_images: Array[BookletImage] = []
+	for image: BookletImage in images:
+		if image.id < 0:
+			new_images.append(image)
 	var error: String = _save_all()
 	if not error.is_empty():
-		# Rolled back, so the IDs the new chapters and fonts were given no longer
-		# exist and the next insert may be given them again: they are new still.
+		# Rolled back, so the IDs the new chapters, fonts and pictures were given
+		# no longer exist and the next insert may be given them again: they are
+		# new still.
 		for chapter: Chapter in new_chapters:
 			chapter.id = -1
 		for font: BookletFont in new_fonts:
 			font.id = -1
+		for image: BookletImage in new_images:
+			image.id = -1
 	return error
 
 
@@ -908,6 +1078,10 @@ func _save_all() -> String:
 	for step: Array in steps:
 		if not db.query_with_bindings(step[0] as String, step[1] as Array):
 			return _rollback("saving the booklet settings")
+	# Before the chapters, which name the new pictures by the ID they get here.
+	var image_error: String = _save_images()
+	if not image_error.is_empty():
+		return image_error
 	for chapter: Chapter in chapters:
 		var error: String = _save_chapter(chapter)
 		if not error.is_empty():
@@ -942,11 +1116,37 @@ func _save_fonts() -> String:
 	return ""
 
 
+## BookletImages as listed, as _save_fonts() does BookletFonts: removed pictures
+## deleted (ON DELETE SET NULL frees the chapters that showed them), kept ones
+## renamed, new ones inserted and given their ID. Their files are not touched.
+func _save_images() -> String:
+	var db: SQLite = Database.db
+	var kept_ids: PackedStringArray = []
+	for image: BookletImage in images:
+		if image.id >= 0:
+			kept_ids.append(str(image.id))
+	if not db.query('DELETE FROM "BookletImages" WHERE ID NOT IN (%s)' % ", ".join(kept_ids)):
+		return _rollback("removing pictures")
+	if not db.query("UPDATE \"BookletImages\" SET Name = char(1) || ID, File = char(1) || ID"):
+		return _rollback("renaming pictures")
+	for image: BookletImage in images:
+		if image.id >= 0:
+			if not db.query_with_bindings('UPDATE "BookletImages" SET Name = ?, File = ? WHERE ID = ?', [image.name, image.file, image.id]):
+				return _rollback("saving a picture")
+		else:
+			if not db.query_with_bindings('INSERT INTO "BookletImages" (Name, File) VALUES (?, ?)', [image.name, image.file]):
+				return _rollback("adding a picture")
+			image.id = db.last_insert_rowid
+	return ""
+
+
 func _save_chapter(chapter: Chapter) -> String:
 	var db: SQLite = Database.db
-	var columns: Array = ["LessonID", "Position", "Booklet", "Title", "ImageGPID", "GreySilent"] + SETTINGS.keys()
+	var columns: Array = ["LessonID", "Position", "Booklet", "Title", "ImageGPID", "ImageID", "GreySilent"] + SETTINGS.keys()
 	var values: Array = [chapter.lesson_id, chapter.position, chapter.booklet, chapter.title,
-			null if chapter.image_gp_id < 0 else chapter.image_gp_id, int(chapter.grey_silent)]
+			null if chapter.image_gp_id < 0 else chapter.image_gp_id,
+			chapter.image.id if chapter.image != null and chapter.image in images else null,
+			int(chapter.grey_silent)]
 	for column: String in SETTINGS:
 		values.append(_column_value(column, chapter.overrides[column]) if chapter.overrides.has(column) else null)
 	if chapter.id < 0:
