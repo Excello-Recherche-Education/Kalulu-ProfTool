@@ -63,9 +63,12 @@ func _add_from_additional_word_list(new_text: String) -> int:
 		var ticked: bool = booklet_only_edit_checkbox != null and booklet_only_edit_checkbox.button_pressed
 		booklet_only = int(bool(booklet_only) or ticked or _holds_booklet_only_word(word_ids))
 		
+		if uppercase_edit_checkbox != null and uppercase_edit_checkbox.button_pressed:
+			uppercase = 1
 		Database.db.insert_row("Sentences", {
 			Sentence = new_text,
 			BookletOnly = booklet_only,
+			Uppercase = uppercase,
 		})
 		id = Database.db.last_insert_rowid
 		for index: int in range(word_ids.size()):
