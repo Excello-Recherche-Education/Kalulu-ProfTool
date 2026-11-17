@@ -21,8 +21,17 @@ Kalulu-ProfTool/
 ├── shared-files.txt      what the Prof Tool takes from the game
 └── tools/
     ├── setup.sh          one-shot setup for a fresh clone
-    └── sync-shared.sh    copy the shared files from kalulu-frontend/
+    ├── sync-shared.sh    copy the shared files from kalulu-frontend/
+    └── apply-capitals.sh set a pack's share in capitals and draw them, headless
 ```
+
+`tools/apply-capitals.sh <pack folder or language.db> <N> <M>` does what the
+Booklets screen's *Apply* does, without opening the Prof Tool: it upgrades the
+pack's `language.db` to the Prof Tool's schema version if it is older, sets the
+share in capitals to N in M, and draws that share of the syllables, words and
+sentences at random, replacing every capital set before. It edits the database
+in place and finds Godot as `$GODOT`, or through Kalulu-Main's
+`scripts/kalulu-env.sh`.
 
 The Prof Tool reads and writes the same packs the game plays, so it uses the
 game's own code for that: the pack reader (`Database`), its file naming, the
