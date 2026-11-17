@@ -3,8 +3,8 @@ extends RefCounted
 ## Brings a language pack's database to the schema this Prof Tool writes, once,
 ## when the pack is opened.
 ##
-## The schema is version 5 of Kalulu-Languages' SCHEMA.md (exactly
-## schema/v5.sql there), and a database says which version it follows in
+## The schema is version 6 of Kalulu-Languages' SCHEMA.md (exactly
+## schema/v6.sql there), and a database says which version it follows in
 ## PRAGMA user_version. Before this, four screens each patched the parts they
 ## needed whenever they opened -- the word, syllable and sentence lists added
 ## Reading / Writing, Lesson Exercises dropped foreign keys and rewrote
@@ -15,7 +15,7 @@ extends RefCounted
 ## A pack is upgraded on the copy being edited, so the next save carries it.
 ## A pack newer than this Prof Tool knows is refused rather than guessed at.
 
-const VERSION: int = 5
+const VERSION: int = 6
 
 const LESSONS_EXERCISES_V1: String = """CREATE TABLE "%s" (
 	"ID"	INTEGER NOT NULL UNIQUE,
@@ -30,7 +30,8 @@ const EXERCISE_TYPES_V1: String = """CREATE TABLE "ExerciseTypes" (
 	"ID"	INTEGER PRIMARY KEY ASC AUTOINCREMENT UNIQUE NOT NULL,
 	"Type"	TEXT NOT NULL
 )"""
-## The reading booklets' tables, as in schema/v2.sql.
+## The reading booklets' tables, as in schema/v2.sql -- which is why
+## BookletChapters still has the UppercaseProportion column version 6 drops.
 const BOOKLET_TABLES_V2: Dictionary[String, String] = {
 	"BookletSettings": """CREATE TABLE "BookletSettings" (
 	"ID"	INTEGER NOT NULL UNIQUE,
@@ -126,6 +127,9 @@ const BOOKLET_IMAGES_V5: String = """CREATE TABLE "BookletImages" (
 	"File"	TEXT NOT NULL UNIQUE,
 	PRIMARY KEY("ID" AUTOINCREMENT)
 )"""
+## The tables whose entries the booklets may print in capitals, as in
+## schema/v6.sql: each has an Uppercase flag, its last column.
+const UPPERCASE_TABLES_V6: PackedStringArray = ["Syllables", "Words", "Sentences"]
 
 
 ## Upgrades the open database to VERSION when it is older, and keeps
@@ -153,6 +157,10 @@ static func upgrade(db: SQLite) -> String:
 			return error
 	if version < 5:
 		var error: String = _to_v5(db)
+		if not error.is_empty():
+			return error
+	if version < 6:
+		var error: String = _to_v6(db)
 		if not error.is_empty():
 			return error
 	if version < VERSION:
@@ -343,6 +351,42 @@ static func _to_v5(db: SQLite) -> String:
 			return message
 	if not db.query("COMMIT"):
 		var message: String = "Could not bring this language pack to schema version 5: %s" % db.get_error_message()
+		db.query("ROLLBACK")
+		Log.error("PackSchema: %s" % message)
+		return message
+	return ""
+
+
+## Version 5 to 6, for the entries the booklets print in capitals: the
+## Uppercase flag on Syllables, Words and Sentences, at 0 so nothing is printed
+## in capitals until Apply draws them, and BookletChapters without its
+## UppercaseProportion, since the share is now the language's alone -- what
+## Kalulu-Languages' schema/v5-to-v6.sql does. In one transaction; each part is
+## skipped when already done.
+##
+## That migration refuses a pack where a chapter set its own share; no pack in
+## Kalulu-Languages did. A local copy edited with an older Prof Tool might, and
+## refusing it here would leave no way to open it, so the chapter's share is
+## dropped and the log says which chapters had one.
+static func _to_v6(db: SQLite) -> String:
+	var steps: Array[String] = ["BEGIN TRANSACTION"]
+	for table: String in UPPERCASE_TABLES_V6:
+		if not "Uppercase" in _columns(db, table):
+			steps.append('ALTER TABLE "%s" ADD COLUMN "Uppercase" INTEGER NOT NULL DEFAULT 0' % table)
+	if "UppercaseProportion" in _columns(db, "BookletChapters"):
+		db.query('SELECT ID, UppercaseProportion FROM "BookletChapters" WHERE UppercaseProportion IS NOT NULL')
+		for row: Dictionary in db.query_result:
+			Log.warn("PackSchema: chapter %d set its own share in capitals (%s), which schema version 6 drops: the language's applies" % [int(row.ID), str(row.UppercaseProportion)])
+		steps.append('ALTER TABLE "BookletChapters" DROP COLUMN "UppercaseProportion"')
+	steps.append("PRAGMA user_version = 6")
+	for step: String in steps:
+		if not db.query(step):
+			var message: String = "Could not bring this language pack to schema version 6: %s" % db.get_error_message()
+			db.query("ROLLBACK")
+			Log.error("PackSchema: %s (step: %s)" % [message, step.left(80)])
+			return message
+	if not db.query("COMMIT"):
+		var message: String = "Could not bring this language pack to schema version 6: %s" % db.get_error_message()
 		db.query("ROLLBACK")
 		Log.error("PackSchema: %s" % message)
 		return message
