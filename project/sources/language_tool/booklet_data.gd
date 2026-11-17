@@ -576,8 +576,11 @@ func lesson_gp_ids(lesson_id: int) -> Array[int]:
 
 ## A title from GPs: each grapheme once, exceptions and silent letters left out
 ## unless nothing else is left; a single letter is written with its capital, as
-## the booklets do ("L l"). Only a starting point: the booklets often title a
-## chapter by contexts ("ci ce cy") rather than graphemes.
+## the booklets do ("L l"); one grapheme per line, so that a title of several
+## prints as a column ("U u" above "N n"), as the hand-written titles do. Only a
+## starting point: the booklets often title a chapter by contexts ("ci ce cy")
+## rather than graphemes. Kalulu-Booklets' pack.title_for() is its twin: change
+## both.
 func title_for(gp_ids: Array[int]) -> String:
 	var kept: Array[int] = []
 	for gp_id: int in gp_ids:
@@ -595,7 +598,7 @@ func title_for(gp_ids: Array[int]) -> String:
 			text = grapheme.to_upper() + " " + grapheme
 		if not text in parts:
 			parts.append(text)
-	return " ".join(parts)
+	return "\n".join(parts)
 
 
 func first_gp_with_image(gp_ids: Array[int]) -> int:
