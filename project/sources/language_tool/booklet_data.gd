@@ -26,19 +26,31 @@ enum Break { SAME_LINE = 0, NEW_LINE = 1, NEW_PARAGRAPH = 2 }
 
 ## The settings a chapter can override, in the order the screen shows them:
 ## column -> [label, lowest, highest, is_real]. The ranges are the validator's
-## (Kalulu-Languages SCHEMA.md rule 8).
+## (Kalulu-Languages SCHEMA.md rule 8). The share in capitals is not one of
+## them: since schema version 6 it is the language's alone (CAPITALS_COLUMN).
 const SETTINGS: Dictionary[String, Array] = {
 	"SyllableCount": ["Syllables printed", 0, 999, false],
 	"SyllableColumns": ["Syllable columns", 1, 10, false],
 	"WordCount": ["Words printed", 0, 999, false],
 	"WordColumns": ["Word columns", 1, 10, false],
-	"UppercaseProportion": ["Share in capitals (0-1)", 0, 1, true],
 	"SentenceFont": ["Sentence font", 0, 2, false],
 	"SentenceFirstFont": ["First paragraph's font", 1, 2, false],
 	"SentencePages": ["Sentence pages (-1 none, 0 chapter page only)", -1, 99, false],
 	"WritingModels": ["Writing: black copies", 0, 10, false],
 	"WritingTracings": ["Writing: grey copies to trace", 0, 10, false],
 }
+## The BookletSettings column holding the share of syllables, words and
+## sentences Apply prints in capitals (apply_capitals()), from 0 to 1. The
+## booklets honour the Uppercase flags only while it is above 0, and the list
+## editors only show them then.
+const CAPITALS_COLUMN: String = "UppercaseProportion"
+## The tables whose entries have an Uppercase flag.
+const CAPITALS_TABLES: PackedStringArray = ["Syllables", "Words", "Sentences"]
+## The largest M of the share's "N in M".
+const CAPITALS_MAX_IN: int = 20
+## BookletSettings columns that are the language's only, besides those of
+## SETTINGS: saved and loaded with them.
+const LANGUAGE_COLUMNS: PackedStringArray = ["Cursive", CAPITALS_COLUMN]
 const SENTENCE_FONTS: PackedStringArray = ["Alternating", "Script only", "Cursive only"]
 const FIRST_FONTS: PackedStringArray = ["", "Script", "Cursive"]
 
@@ -115,7 +127,7 @@ class BookletImage:
 	var name: String = ""
 	var file: String = ""
 
-## BookletSettings: column -> value, Cursive included.
+## BookletSettings: column -> value, LANGUAGE_COLUMNS included.
 var settings: Dictionary[String, float] = {}
 ## BookletFonts, in the order they were added.
 var fonts: Array[BookletFont] = []
@@ -192,7 +204,7 @@ func load_from_database() -> void:
 	db.query("SELECT * FROM BookletSettings ORDER BY ID LIMIT 1")
 	if not db.query_result.is_empty():
 		var row: Dictionary = db.query_result[0]
-		for column: String in ["Cursive"] + SETTINGS.keys():
+		for column: String in Array(LANGUAGE_COLUMNS) + SETTINGS.keys():
 			settings[column] = float(row[column])
 		for column: String in FONT_ROLES:
 			if row[column] != null and fonts_by_id.has(int(row[column])):
@@ -1049,7 +1061,7 @@ func _save_all() -> String:
 	sort_chapters()
 	var db: SQLite = Database.db
 	var steps: Array[Array] = []
-	var settings_columns: Array = ["Cursive"] + SETTINGS.keys()
+	var settings_columns: Array = Array(LANGUAGE_COLUMNS) + SETTINGS.keys()
 	var assignments: PackedStringArray = []
 	var values: Array = []
 	for column: String in settings_columns:
@@ -1194,6 +1206,8 @@ func _save_chapter(chapter: Chapter) -> String:
 
 
 static func _column_value(column: String, value: float) -> Variant:
+	if column == CAPITALS_COLUMN:
+		return clampf(value, 0.0, 1.0)
 	if column == "Cursive" or not SETTINGS[column][3]:
 		return int(value)
 	return value
@@ -1204,5 +1218,87 @@ func _rollback(what: String) -> String:
 	Database.db.query("ROLLBACK")
 	Log.error("BookletData: " + message)
 	return message
+
+#endregion
+
+
+#region Capitals
+
+## The language's share in capitals, as stored: 0 when the pack has no
+## BookletSettings row.
+static func capitals_share(db: SQLite) -> float:
+	db.query('SELECT "%s" FROM "BookletSettings" ORDER BY ID LIMIT 1' % CAPITALS_COLUMN)
+	if db.query_result.is_empty() or db.query_result[0][CAPITALS_COLUMN] == null:
+		return 0.0
+	return float(db.query_result[0][CAPITALS_COLUMN])
+
+
+## The share as the screen shows it, "N in M": Vector2i(N, M), with the
+## smallest M up to CAPITALS_MAX_IN that gives it exactly -- 1/3 stored as
+## 0.333... reads back as 1 in 3 -- else the nearest, the smaller M on a tie.
+static func capitals_fraction(share: float) -> Vector2i:
+	share = clampf(share, 0.0, 1.0)
+	var best: Vector2i = Vector2i(0, 1)
+	var best_error: float = INF
+	for in_count: int in range(1, CAPITALS_MAX_IN + 1):
+		var count: int = roundi(share * in_count)
+		var error: float = absf(float(count) / in_count - share)
+		if error < best_error - 1e-9:
+			best = Vector2i(count, in_count)
+			best_error = error
+	return best
+
+
+## Draws the capitals again: in one transaction, writes the share to
+## BookletSettings, then, for each of Syllables, Words and Sentences, clears
+## every Uppercase flag and sets it on round(rows x share) rows chosen at
+## random among all the table's rows, booklet-only or not. At 0 it only clears
+## them. Every flag set by hand is replaced. Returns an error message, empty on
+## success. Usable without the screen (tools/apply_capitals.gd).
+##
+## Plain queries only: godot-sqlite's insert_row() and update_rows() commit a
+## transaction of their own.
+static func apply_capitals(db: SQLite, share: float) -> String:
+	share = clampf(share, 0.0, 1.0)
+	var picked: Dictionary[String, PackedStringArray] = {}
+	for table: String in CAPITALS_TABLES:
+		db.query('SELECT ID FROM "%s"' % table)
+		var ids: Array = []
+		for row: Dictionary in db.query_result:
+			ids.append(int(row.ID))
+		ids.shuffle()
+		var chosen: PackedStringArray = []
+		for index: int in range(mini(roundi(ids.size() * share), ids.size())):
+			chosen.append(str(ids[index]))
+		picked[table] = chosen
+	var steps: Array[Array] = [['UPDATE "BookletSettings" SET "%s" = ?' % CAPITALS_COLUMN, [share]]]
+	for table: String in CAPITALS_TABLES:
+		steps.append(['UPDATE "%s" SET "Uppercase" = 0 WHERE "Uppercase" != 0' % table, []])
+		if not picked[table].is_empty():
+			steps.append(['UPDATE "%s" SET "Uppercase" = 1 WHERE ID IN (%s)' % [table, ", ".join(picked[table])], []])
+	if not db.query("BEGIN TRANSACTION"):
+		return "Could not draw the capitals: %s" % db.get_error_message()
+	for step: Array in steps:
+		if not db.query_with_bindings(step[0] as String, step[1] as Array):
+			var message: String = "Could not draw the capitals: %s" % db.get_error_message()
+			db.query("ROLLBACK")
+			Log.error("BookletData: %s" % message)
+			return message
+	if not db.query("COMMIT"):
+		var message: String = "Could not draw the capitals: %s" % db.get_error_message()
+		db.query("ROLLBACK")
+		Log.error("BookletData: %s" % message)
+		return message
+	return ""
+
+
+## How many entries of each table are in capitals: table -> [flagged, rows].
+static func capitals_counts(db: SQLite) -> Dictionary[String, Array]:
+	var counts: Dictionary[String, Array] = {}
+	for table: String in CAPITALS_TABLES:
+		db.query('SELECT COUNT(*) AS Rows, COALESCE(SUM("Uppercase" != 0), 0) AS Flagged FROM "%s"' % table)
+		var row: Dictionary = db.query_result[0] if not db.query_result.is_empty() else {Rows = 0, Flagged = 0}
+		counts[table] = [int(row.Flagged), int(row.Rows)]
+	return counts
 
 #endregion

@@ -10,6 +10,9 @@ var _element: WordListElement
 var sub_elements_list: Dictionary = {}
 var new_gp_asked_element: WordListElement
 var new_gp_asked_ind: int
+## Whether the elements show their CAPS box: the language's share in capitals
+## is above 0.
+var capitals_shown: bool = false
 
 @onready var elements_container: VBoxContainer = %ElementsContainer
 @onready var new_gp_layer: CanvasLayer = $NewGPLayer
@@ -35,6 +38,11 @@ func _ready() -> void:
 	create_sub_elements_list()
 	
 	_element = element_scene.instantiate()
+	# The CAPS boxes only mean something while the language prints a share in
+	# capitals: read once, for every element the list makes.
+	capitals_shown = BookletData.capitals_share(Database.db) > 0.0
+	if new_gp is WordListElement:
+		(new_gp as WordListElement).capitals_shown = capitals_shown
 	
 	Database.db.query(_get_query())
 	
@@ -47,6 +55,8 @@ func _ready() -> void:
 		element.exception = elem.Exception
 		element.reading = elem.Reading
 		element.booklet_only = elem.BookletOnly
+		element.uppercase = elem.Uppercase
+		element.capitals_shown = capitals_shown
 		element.set_gp_ids_from_string(elem[_element.sub_table_id + "s"] as String)
 		elements_container.add_child(element)
 		element.undo_redo = undo_redo
@@ -71,18 +81,18 @@ func _ready() -> void:
 # JOIN instead: SQLite then plans it differently and group_concat stops following
 # Position, so Save, which compares that string with the list's, deletes the entry.
 func _get_query() -> String:
-	return "SELECT %s.ID as %sId, %s, group_concat(%s, ' ') as %ss, group_concat(%s, ' ') as %ss, group_concat(%s.ID, ' ') as %ss, %s.Exception, %s.Reading, %s.BookletOnly 
+	return "SELECT %s.ID as %sId, %s, group_concat(%s, ' ') as %ss, group_concat(%s, ' ') as %ss, group_concat(%s.ID, ' ') as %ss, %s.Exception, %s.Reading, %s.BookletOnly, %s.Uppercase
 			FROM %s 
 			INNER JOIN ( SELECT * FROM %s ORDER BY %s.Position ) %s ON %s.ID = %s.%sID 
 			INNER JOIN %s ON %s.ID = %s.%s
 			GROUP BY %s.ID
 			UNION ALL
-			SELECT ID, %s, '', '', '', Exception, Reading, BookletOnly
+			SELECT ID, %s, '', '', '', Exception, Reading, BookletOnly, Uppercase
 			FROM %s
 			WHERE ID NOT IN ( SELECT %sID FROM %s )" % [_element.table, _element.table_graph_column,
 				_element.table_graph_column, _element.sub_table_graph_column, _element.sub_table_graph_column,
 				_element.sub_table_phon_column, _element.sub_table_phon_column,
-				_element.sub_table, _element.sub_table_id, _element.table, _element.table, _element.table,
+				_element.sub_table, _element.sub_table_id, _element.table, _element.table, _element.table, _element.table,
 				_element.table,
 				_element.relational_table, _element.relational_table, _element.relational_table, _element.table, _element.relational_table, _element.table_graph_column,
 				_element.sub_table, _element.sub_table, _element.relational_table, _element.sub_table_id,
@@ -111,6 +121,7 @@ func _on_plus_button_pressed() -> void:
 	var element: WordListElement = element_scene.instantiate()
 	element.sub_elements_list = sub_elements_list
 	element.word = ""
+	element.capitals_shown = capitals_shown
 	element.undo_redo = undo_redo
 	element.delete_pressed.connect(_on_element_delete_pressed.bind(element))
 	element.new_gp_asked.connect(_on_element_new_gp_asked.bind(element))

@@ -375,8 +375,59 @@ func _show_settings() -> void:
 		grid.add_child(_setting_control(column, data.settings.get(column, 0.0), func(value: float) -> void:
 			data.settings[column] = value
 			_changed()))
+	_show_capitals()
 	_show_fonts()
 	_show_images()
+
+
+## The language's share in capitals, "N in M", and Apply, which draws them.
+## The share is stored as N / M; changing it draws nothing until Apply.
+func _show_capitals() -> void:
+	_heading("Capitals")
+	_editor.add_child(_label("The share of syllables, words and sentences the booklets print in CAPITALS. Above 0, each entry of the Syllable, Word and Sentence Lists has a CAPS box. Changing the share changes no box: Apply draws them again at random at this share, which replaces every box ticked or unticked by hand, and is written at once. At 0 in 1 nothing is printed in capitals and the boxes are hidden."))
+	var fraction: Vector2i = BookletData.capitals_fraction(data.settings.get(BookletData.CAPITALS_COLUMN, 0.0))
+	var row: HBoxContainer = HBoxContainer.new()
+	row.add_theme_constant_override("separation", 30)
+	_editor.add_child(row)
+	row.add_child(_label("Capitals:", TEXT_SIZE, false))
+	var count: SpinBox = _spin_box(fraction.x, 0, fraction.y, false, func(_value: float) -> void: pass)
+	row.add_child(count)
+	row.add_child(_label("in", TEXT_SIZE, false))
+	var in_count: SpinBox = _spin_box(fraction.y, 1, BookletData.CAPITALS_MAX_IN, false, func(_value: float) -> void: pass)
+	row.add_child(in_count)
+	var store: Callable = func(_value: float) -> void:
+		count.max_value = in_count.value
+		data.settings[BookletData.CAPITALS_COLUMN] = count.value / in_count.value
+		_changed()
+	count.value_changed.connect(store)
+	in_count.value_changed.connect(store)
+	row.add_child(_button("Apply", func() -> void: _confirm_apply_capitals(int(count.value), int(in_count.value))))
+
+
+func _confirm_apply_capitals(count: int, in_count: int) -> void:
+	var dialog: ConfirmationDialog = ConfirmationDialog.new()
+	dialog.title = "Draw the capitals again?"
+	if count == 0:
+		dialog.dialog_text = "No syllable, word or sentence will be in capitals: every CAPS box is unticked, those ticked by hand included. This is written at once. Continue?"
+	else:
+		dialog.dialog_text = "%d in %d of the syllables, words and sentences are drawn at random to be printed in capitals. This replaces every CAPS box ticked or unticked by hand, and is written at once. Continue?" % [count, in_count]
+	dialog.ok_button_text = "Apply"
+	dialog.confirmed.connect(func() -> void: _apply_capitals(float(count) / in_count))
+	add_child(dialog)
+	dialog.popup_centered()
+
+
+func _apply_capitals(share: float) -> void:
+	var error: String = BookletData.apply_capitals(Database.db, share)
+	if not error.is_empty():
+		_status.text = error
+		return
+	data.settings[BookletData.CAPITALS_COLUMN] = share
+	var parts: PackedStringArray = []
+	var counts: Dictionary[String, Array] = BookletData.capitals_counts(Database.db)
+	for table: String in counts:
+		parts.append("%d of %d %s" % [counts[table][0], counts[table][1], table.to_lower()])
+	_status.text = "Capitals drawn and written: %s.%s" % [", ".join(parts), " Save keeps the screen's other changes." if _dirty else ""]
 
 
 func _show_chapter(chapter: BookletData.Chapter) -> void:

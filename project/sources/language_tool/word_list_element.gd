@@ -38,6 +38,16 @@ var reading: int = 0:
 ## Printed in the reading booklets only: the game leaves the entry out.
 var booklet_only: int = 0:
 	set = set_booklet_only
+## Printed in capitals in the reading booklets (schema version 6), while the
+## language's share in capitals is above 0. Apply, on the Booklets screen,
+## draws these at random; the box changes one by hand.
+var uppercase: int = 0:
+	set = set_uppercase
+## Whether the CAPS boxes are shown: only while the language's share in
+## capitals is above 0 (BookletData.capitals_share()), since the booklets
+## ignore the flag at 0. Hidden, the flag is still loaded and saved unchanged.
+var capitals_shown: bool = false:
+	set = set_capitals_shown
 var sub_elements_list: Dictionary = {}
 ## Where the word as typed or loaded has its hyphens, each as the number of
 ## letters before it: a hyphen is no GP, so _spelling() puts them back.
@@ -54,6 +64,8 @@ var _hyphens: Array[int] = []
 @onready var reading_edit_checkbox: CheckBox = %ReadingEditCheckBox
 @onready var booklet_only_checkbox: CheckBox = %BookletOnlyCheckBox
 @onready var booklet_only_edit_checkbox: CheckBox = %BookletOnlyEditCheckBox
+@onready var uppercase_checkbox: CheckBox = %UppercaseCheckBox
+@onready var uppercase_edit_checkbox: CheckBox = %UppercaseEditCheckBox
 @onready var graphemes_edit_container: HBoxContainer = %GraphemesEditContainer
 @onready var add_gp_button: MarginContainer = %AddGPButton
 @onready var remove_gp_button: MarginContainer = %RemoveGPButton2
@@ -81,6 +93,22 @@ func set_booklet_only(p_booklet_only: bool) -> void:
 		booklet_only_checkbox.button_pressed = bool(booklet_only)
 	if booklet_only_edit_checkbox:
 		booklet_only_edit_checkbox.button_pressed = bool(booklet_only)
+
+
+func set_uppercase(p_uppercase: bool) -> void:
+	uppercase = p_uppercase
+	if uppercase_checkbox:
+		uppercase_checkbox.button_pressed = bool(uppercase)
+	if uppercase_edit_checkbox:
+		uppercase_edit_checkbox.button_pressed = bool(uppercase)
+
+
+func set_capitals_shown(p_capitals_shown: bool) -> void:
+	capitals_shown = p_capitals_shown
+	if uppercase_checkbox:
+		uppercase_checkbox.visible = capitals_shown
+	if uppercase_edit_checkbox:
+		uppercase_edit_checkbox.visible = capitals_shown
 
 
 func set_word(p_word: String) -> void:
@@ -215,6 +243,8 @@ func _ready() -> void:
 	set_exception(exception)
 	set_reading(reading)
 	set_booklet_only(booklet_only)
+	set_uppercase(uppercase)
+	set_capitals_shown(capitals_shown)
 	(%WordEditLabel as Label).text = table_graph_column + ": "
 	(%GPsEditLabel as Label).text = sub_table + ": "
 	word_edit.text_changed.connect(func(text: String) -> void: _hyphens = _hyphens_of(text))
@@ -240,11 +270,13 @@ func _on_validate_button_pressed() -> void:
 	undo_redo.add_do_property(self, "exception", int(exception_edit_checkbox.button_pressed))
 	undo_redo.add_do_property(self, "reading", int(reading_edit_checkbox.button_pressed))
 	undo_redo.add_do_property(self, "booklet_only", int(booklet_only_edit_checkbox.button_pressed))
+	undo_redo.add_do_property(self, "uppercase", int(uppercase_edit_checkbox.button_pressed))
 	undo_redo.add_undo_property(self, "gp_ids", gp_ids.duplicate())
 	undo_redo.add_undo_property(self, "word", word)
 	undo_redo.add_undo_property(self, "exception", int(exception_checkbox.button_pressed))
 	undo_redo.add_undo_property(self, "reading", int(reading_checkbox.button_pressed))
 	undo_redo.add_undo_property(self, "booklet_only", int(booklet_only_checkbox.button_pressed))
+	undo_redo.add_undo_property(self, "uppercase", int(uppercase_checkbox.button_pressed))
 	
 	undo_redo.commit_action()
 	tab_container.current_tab = 0
@@ -288,14 +320,14 @@ func insert_in_database() -> void:
 			id = Database.db.query_result[0].ID
 	
 	if id >= 0:
-		var query: String = "SELECT %s, group_concat(%s, ' ') as %ss, group_concat(%s, ' ') as %ss, group_concat(%s.ID, ' ') as %sIDs, group_concat(%s.ID, ' ') as %sIDs, %s.Exception, %s.Reading, %s.BookletOnly
+		var query: String = "SELECT %s, group_concat(%s, ' ') as %ss, group_concat(%s, ' ') as %ss, group_concat(%s.ID, ' ') as %sIDs, group_concat(%s.ID, ' ') as %sIDs, %s.Exception, %s.Reading, %s.BookletOnly, %s.Uppercase
 			FROM %s 
 			INNER JOIN ( SELECT * FROM %s ORDER BY %s.Position ) %s ON %s.ID = %s.%sID 
 			INNER JOIN %s ON %s.ID = %s.%s
 			WHERE %s.ID = ? 
 			GROUP BY %s.ID" % [table_graph_column, sub_table_graph_column, sub_table_graph_column,
 				sub_table_phon_column, sub_table_phon_column,
-				relational_table, relational_table, sub_table, sub_table, table, table, table,
+				relational_table, relational_table, sub_table, sub_table, table, table, table, table,
 				table,
 				relational_table, relational_table, relational_table, table, relational_table, table_graph_column,
 				sub_table, sub_table, relational_table, sub_table_id,
@@ -305,8 +337,8 @@ func insert_in_database() -> void:
 		Log.trace("WordListElement: Sending query to insert in database: %s" % query)
 		if not Database.db.query_result.is_empty():
 			var element: Dictionary = Database.db.query_result[0]
-			if word != element[table_graph_column] or exception != element.Exception or reading != element.Reading or booklet_only != element.BookletOnly:
-				Database.db.update_rows(table, "ID=%s" % id, {table_graph_column: word, "Exception": exception, "Reading": reading, "BookletOnly": booklet_only})
+			if word != element[table_graph_column] or exception != element.Exception or reading != element.Reading or booklet_only != element.BookletOnly or uppercase != element.Uppercase:
+				Database.db.update_rows(table, "ID=%s" % id, {table_graph_column: word, "Exception": exception, "Reading": reading, "BookletOnly": booklet_only, "Uppercase": uppercase})
 			if " ".join(gp_ids) != element[sub_table + "IDs"]:
 				var gps_in_words_ids: Array = Array((element[relational_table + "IDs"] as String).split(" "))
 				while gps_in_words_ids.size() > gp_ids.size():
@@ -330,8 +362,8 @@ func insert_in_database() -> void:
 			if not Database.db.query_result.is_empty():
 				var element: Dictionary = Database.db.query_result[0]
 				id = element.ID
-				if word != element[table_graph_column] or exception != element.Exception or reading != element.Reading or booklet_only != element.BookletOnly:
-					Database.db.update_rows(table, "ID=%s" % id, {table_graph_column: word, "Exception": exception, "Reading": reading, "BookletOnly": booklet_only})
+				if word != element[table_graph_column] or exception != element.Exception or reading != element.Reading or booklet_only != element.BookletOnly or uppercase != element.Uppercase:
+					Database.db.update_rows(table, "ID=%s" % id, {table_graph_column: word, "Exception": exception, "Reading": reading, "BookletOnly": booklet_only, "Uppercase": uppercase})
 				for index: int in range(gp_ids.size()):
 					Database.db.insert_row(relational_table, {
 						table_graph_column + "ID": id,
@@ -341,7 +373,7 @@ func insert_in_database() -> void:
 			
 	Database.db.query_with_bindings("SELECT * FROM %s WHERE %s=?" % [table, table_graph_column], [word])
 	if Database.db.query_result.is_empty():
-		Database.db.insert_row(table, {table_graph_column: word, "BookletOnly": booklet_only})
+		Database.db.insert_row(table, {table_graph_column: word, "BookletOnly": booklet_only, "Uppercase": uppercase})
 		id = Database.db.last_insert_rowid
 		for index: int in range(gp_ids.size()):
 			Database.db.insert_row(relational_table, {

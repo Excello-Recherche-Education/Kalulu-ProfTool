@@ -62,7 +62,17 @@ layout_mode = 2
 tooltip_text = "Booklet only: printed in the reading booklets, left out of the game"
 theme_override_font_sizes/font_size = 50
 disabled = true
-text = "Booklet"
+text = "Booklet "
+expand_icon = true
+
+[node name="UppercaseCheckBox" type="CheckBox" parent="TabContainer/NormalContainer" unique_id=1115162439]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+tooltip_text = "Printed in capitals in the booklets"
+theme_override_font_sizes/font_size = 50
+disabled = true
+text = "CAPS"
 expand_icon = true
 
 [node name="Word" type="Label" parent="TabContainer/NormalContainer" unique_id=971120727]
@@ -128,6 +138,15 @@ layout_mode = 2
 tooltip_text = "Only the printed reading booklets use it: the game leaves it out (it needs no recording)"
 theme_override_font_sizes/font_size = 50
 text = "Booklet only"
+expand_icon = true
+
+[node name="UppercaseEditCheckBox" type="CheckBox" parent="TabContainer/EditContainer/HBoxContainer" unique_id=119892843]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+tooltip_text = "Printed in capitals in the booklets. Apply, on the Booklets screen, draws these again at random"
+theme_override_font_sizes/font_size = 50
+text = "CAPS"
 expand_icon = true
 
 [node name="MinusButton" parent="TabContainer/EditContainer/HBoxContainer" unique_id=1105940208 instance=ExtResource("1_g3tt5")]
