@@ -354,18 +354,8 @@ func _show_settings() -> void:
 	_update_chapter_buttons()
 	_clear_editor()
 	_editor.add_child(_label("Language settings", 60))
+	_show_series_and_versions()
 	_editor.add_child(_label("Every chapter uses these unless it sets its own."))
-	# A short box and a wrapped label: a CheckBox's text never wraps, and a long
-	# one widened the whole form past the screen, Save included.
-	var cursive: CheckBox = CheckBox.new()
-	cursive.text = "Written in cursive too"
-	cursive.add_theme_font_size_override("font_size", TEXT_SIZE)
-	cursive.button_pressed = data.settings.get("Cursive", 1.0) != 0.0
-	cursive.toggled.connect(func(pressed: bool) -> void:
-		data.settings["Cursive"] = float(pressed)
-		_changed())
-	_editor.add_child(cursive)
-	_editor.add_child(_label("Ticked: titles, sentences and writing pages are also printed in cursive. Unticked: everything is printed in script, and the sentence fonts below are ignored."))
 	var grid: GridContainer = GridContainer.new()
 	grid.columns = 2
 	grid.add_theme_constant_override("h_separation", 30)
@@ -378,6 +368,74 @@ func _show_settings() -> void:
 	_show_capitals()
 	_show_fonts()
 	_show_images()
+
+
+## What the language's booklets print: its series, script and cursive, at least
+## one, and the versions besides the base booklet, which always is. Short boxes
+## and a wrapped label under them: a CheckBox's text never wraps, and a long one
+## widened the whole form past the screen, Save included.
+func _show_series_and_versions() -> void:
+	var series_boxes: Array[CheckBox] = []
+	var series_flow: HFlowContainer = _settings_row("Series:")
+	for column: String in BookletData.SERIES:
+		var box: CheckBox = _check_box(BookletData.SERIES[column][0], BookletData.SERIES[column][2], data.prints_series(column))
+		series_boxes.append(box)
+		series_flow.add_child(box)
+	# The last series ticked cannot be unticked: a language prints at least one.
+	var lock_last_series: Callable = func() -> void:
+		var ticked: int = series_boxes.filter(func(box: CheckBox) -> bool: return box.button_pressed).size()
+		for index: int in range(series_boxes.size()):
+			var box: CheckBox = series_boxes[index]
+			var last: bool = ticked == 1 and box.button_pressed
+			box.disabled = last
+			box.tooltip_text = str(BookletData.SERIES.values()[index][2]) \
+					+ ("\nThe language prints at least one series: tick the other one first." if last else "")
+	for index: int in range(series_boxes.size()):
+		var column: String = BookletData.SERIES.keys()[index]
+		series_boxes[index].toggled.connect(func(pressed: bool) -> void:
+			data.settings[column] = float(pressed)
+			lock_last_series.call()
+			_changed())
+	lock_last_series.call()
+
+	var versions_flow: HFlowContainer = _settings_row("Versions:")
+	var base: CheckBox = _check_box("Base", "The booklet itself: always printed.", true)
+	base.disabled = true
+	versions_flow.add_child(base)
+	for column: String in BookletData.VERSIONS:
+		var box: CheckBox = _check_box(BookletData.VERSIONS[column][0], BookletData.VERSIONS[column][1], data.prints_version(column))
+		box.toggled.connect(func(pressed: bool) -> void:
+			data.settings[column] = float(pressed)
+			_changed())
+		versions_flow.add_child(box)
+	_editor.add_child(_label("Script: everything in script, with the capitals; the sentence fonts below do not apply to it. Cursive: titles, sentences and writing pages in cursive too, without capitals. The base booklet is always printed, and each version ticked besides it, in every series."))
+
+
+## A row of the language settings: a label, then a flow of controls the caller
+## fills, which wraps rather than widen the form.
+func _settings_row(text: String) -> HFlowContainer:
+	var row: HBoxContainer = HBoxContainer.new()
+	row.add_theme_constant_override("separation", 30)
+	_editor.add_child(row)
+	var label: Label = _label(text, TEXT_SIZE, false)
+	label.custom_minimum_size.x = 220
+	# Level with the first line of controls when the flow wraps.
+	label.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	row.add_child(label)
+	var flow: HFlowContainer = HFlowContainer.new()
+	flow.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	flow.add_theme_constant_override("h_separation", 30)
+	row.add_child(flow)
+	return flow
+
+
+func _check_box(text: String, tooltip: String, pressed: bool) -> CheckBox:
+	var box: CheckBox = CheckBox.new()
+	box.text = text
+	box.tooltip_text = tooltip
+	box.add_theme_font_size_override("font_size", TEXT_SIZE)
+	box.button_pressed = pressed
+	return box
 
 
 ## The language's share in capitals, "N in M", and Apply, which draws them.
@@ -459,7 +517,7 @@ func _show_chapter(chapter: BookletData.Chapter) -> void:
 	row.add_child(grey)
 
 	_heading("Title")
-	_editor.add_child(_label("Printed in script, and in cursive beside it when the language is. One line per line of the title; empty for no title."))
+	_editor.add_child(_label("Printed in script, and in cursive beside it in the cursive series. One line per line of the title; empty for no title."))
 	var title_edit: TextEdit = _text_edit(chapter.title, 150, func(text: String) -> void:
 		chapter.title = text.strip_edges()
 		_changed()
@@ -777,8 +835,8 @@ func _show_font_preview(column: String, preview: Label, missing: Label) -> void:
 	if not lacking.is_empty():
 		missing.text = "This font has no %s: the booklets cannot print %s." % [
 				" ".join(lacking), "it" if lacking.size() == 1 else "them"]
-	if column == "CursiveFontID" and data.settings.get("Cursive", 1.0) == 0.0:
-		missing.text = ("%s\n" % missing.text if not missing.text.is_empty() else "") + "Not printed: this language is written in script only (see the box above)."
+	if column == "CursiveFontID" and not data.prints_series("CursiveSeries"):
+		missing.text = ("%s\n" % missing.text if not missing.text.is_empty() else "") + "Not printed: this language prints no cursive series (see Series above)."
 
 
 ## A sentence of the pack, the first one the booklets could start with.

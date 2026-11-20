@@ -48,9 +48,28 @@ const CAPITALS_COLUMN: String = "UppercaseProportion"
 const CAPITALS_TABLES: PackedStringArray = ["Syllables", "Words", "Sentences"]
 ## The largest M of the share's "N in M".
 const CAPITALS_MAX_IN: int = 20
+## The series a language's booklets come in (schema version 7), at least one:
+## BookletSettings column -> [label, default, tooltip]. The script series prints
+## everything in script, the sentence fonts ignored, with the capitals; the
+## cursive series prints titles, sentences and writing pages in cursive too, and
+## no capitals.
+const SERIES: Dictionary[String, Array] = {
+	"ScriptSeries": ["Script", 0.0, "A series printed in script only, capitals included. The sentence fonts below do not apply to it."],
+	"CursiveSeries": ["Cursive", 1.0, "A series with titles, sentences and writing pages also in cursive, and no capitals."],
+}
+## The versions printed besides the base booklet, which always is (schema
+## version 7): BookletSettings column -> [label, tooltip]. Each defaults to 1.
+const VERSIONS: Dictionary[String, Array] = {
+	"TeacherVersion": ["Teacher", "A page before each chapter with its title and picture, for the teacher."],
+	"NoWritingVersion": ["No writing", "The base booklet without its writing pages."],
+	"DyslexiaVersion": ["Dyslexia", "Bigger, airier text for pupils with dyslexia."],
+	"DyspraxiaVersion": ["Dyspraxia", "Bigger text, script only but for the writing pages, graphemes coloured, for pupils with dyspraxia."],
+	"AdhdVersion": ["ADHD", "As dyspraxia, with the cursive kept and no animal drawn, for pupils with attention difficulties."],
+}
 ## BookletSettings columns that are the language's only, besides those of
 ## SETTINGS: saved and loaded with them.
-const LANGUAGE_COLUMNS: PackedStringArray = ["Cursive", CAPITALS_COLUMN]
+const LANGUAGE_COLUMNS: PackedStringArray = ["ScriptSeries", "CursiveSeries", "TeacherVersion", "NoWritingVersion",
+		"DyslexiaVersion", "DyspraxiaVersion", "AdhdVersion", CAPITALS_COLUMN]
 const SENTENCE_FONTS: PackedStringArray = ["Alternating", "Script only", "Cursive only"]
 const FIRST_FONTS: PackedStringArray = ["", "Script", "Cursive"]
 
@@ -643,6 +662,18 @@ func value_of(chapter: Chapter, column: String) -> float:
 	return chapter.overrides.get(column, settings.get(column, 0.0))
 
 
+## Whether the language prints a series (a SERIES column): its stored value, or
+## the column's default when the pack has no BookletSettings row.
+func prints_series(column: String) -> bool:
+	return settings.get(column, SERIES[column][1]) != 0.0
+
+
+## Whether the language prints a version besides the base booklet (a VERSIONS
+## column); 1 by default.
+func prints_version(column: String) -> bool:
+	return settings.get(column, 1.0) != 0.0
+
+
 #region Fonts
 
 ## A font added from a file: path is where it was picked, which must be inside
@@ -841,10 +872,13 @@ func _image_named(image_name: String, ignored: BookletImage) -> BookletImage:
 ## each; Save refuses while there is any. Booklets are numbered 1, 2, 3... along
 ## the chapters, each chapter in the same booklet as the one before or the next;
 ## a word entry must still hold the word it was picked from, and each writing,
-## table and fluency entry must be picked from the pack and still hold it.
+## table and fluency entry must be picked from the pack and still hold it. The
+## language prints at least one series.
 func save_errors() -> PackedStringArray:
 	sort_chapters()
 	var errors: PackedStringArray = []
+	if not prints_series("ScriptSeries") and not prints_series("CursiveSeries"):
+		errors.append("The language prints no series: tick Script, Cursive or both in Language settings")
 	var names: Dictionary[String, bool] = {}
 	for font: BookletFont in fonts:
 		if font.name.strip_edges().is_empty():
@@ -1211,7 +1245,9 @@ func _save_chapter(chapter: Chapter) -> String:
 static func _column_value(column: String, value: float) -> Variant:
 	if column == CAPITALS_COLUMN:
 		return clampf(value, 0.0, 1.0)
-	if column == "Cursive" or not SETTINGS[column][3]:
+	if SERIES.has(column) or VERSIONS.has(column):
+		return int(value != 0.0)
+	if not SETTINGS[column][3]:
 		return int(value)
 	return value
 

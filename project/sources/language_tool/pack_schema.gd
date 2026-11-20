@@ -3,8 +3,8 @@ extends RefCounted
 ## Brings a language pack's database to the schema this Prof Tool writes, once,
 ## when the pack is opened.
 ##
-## The schema is version 6 of Kalulu-Languages' SCHEMA.md (exactly
-## schema/v6.sql there), and a database says which version it follows in
+## The schema is version 7 of Kalulu-Languages' SCHEMA.md (exactly
+## schema/v7.sql there), and a database says which version it follows in
 ## PRAGMA user_version. Before this, four screens each patched the parts they
 ## needed whenever they opened -- the word, syllable and sentence lists added
 ## Reading / Writing, Lesson Exercises dropped foreign keys and rewrote
@@ -15,7 +15,7 @@ extends RefCounted
 ## A pack is upgraded on the copy being edited, so the next save carries it.
 ## A pack newer than this Prof Tool knows is refused rather than guessed at.
 
-const VERSION: int = 6
+const VERSION: int = 7
 
 const LESSONS_EXERCISES_V1: String = """CREATE TABLE "%s" (
 	"ID"	INTEGER NOT NULL UNIQUE,
@@ -31,7 +31,8 @@ const EXERCISE_TYPES_V1: String = """CREATE TABLE "ExerciseTypes" (
 	"Type"	TEXT NOT NULL
 )"""
 ## The reading booklets' tables, as in schema/v2.sql -- which is why
-## BookletChapters still has the UppercaseProportion column version 6 drops.
+## BookletChapters still has the UppercaseProportion column version 6 drops,
+## and BookletSettings the Cursive column version 7 replaces.
 const BOOKLET_TABLES_V2: Dictionary[String, String] = {
 	"BookletSettings": """CREATE TABLE "BookletSettings" (
 	"ID"	INTEGER NOT NULL UNIQUE,
@@ -130,6 +131,10 @@ const BOOKLET_IMAGES_V5: String = """CREATE TABLE "BookletImages" (
 ## The tables whose entries the booklets may print in capitals, as in
 ## schema/v6.sql: each has an Uppercase flag, its last column.
 const UPPERCASE_TABLES_V6: PackedStringArray = ["Syllables", "Words", "Sentences"]
+## The versions of the booklets a language prints besides the base one, as in
+## schema/v7.sql: BookletSettings columns, in their order there, after the two
+## series columns.
+const VERSION_COLUMNS_V7: PackedStringArray = ["TeacherVersion", "NoWritingVersion", "DyslexiaVersion", "DyspraxiaVersion", "AdhdVersion"]
 
 
 ## Upgrades the open database to VERSION when it is older, and keeps
@@ -161,6 +166,10 @@ static func upgrade(db: SQLite) -> String:
 			return error
 	if version < 6:
 		var error: String = _to_v6(db)
+		if not error.is_empty():
+			return error
+	if version < 7:
+		var error: String = _to_v7(db)
 		if not error.is_empty():
 			return error
 	if version < VERSION:
@@ -387,6 +396,41 @@ static func _to_v6(db: SQLite) -> String:
 			return message
 	if not db.query("COMMIT"):
 		var message: String = "Could not bring this language pack to schema version 6: %s" % db.get_error_message()
+		db.query("ROLLBACK")
+		Log.error("PackSchema: %s" % message)
+		return message
+	return ""
+
+
+## Version 6 to 7, for what a language's booklets print: Cursive becomes two
+## series, ScriptSeries and CursiveSeries, a pack with Cursive 1 printing the
+## cursive series as it did and one with Cursive 0 the script series; then the
+## five versions printed besides the base booklet, TeacherVersion to
+## AdhdVersion, all 1, as every one was printed before. Nothing a pack prints
+## changes. What Kalulu-Languages' schema/v6-to-v7.sql does, in its order, in
+## one transaction; each part is skipped when already done.
+static func _to_v7(db: SQLite) -> String:
+	var steps: Array[String] = ["BEGIN TRANSACTION"]
+	var columns: Array[String] = _columns(db, "BookletSettings")
+	if not "ScriptSeries" in columns:
+		steps.append('ALTER TABLE "BookletSettings" ADD COLUMN "ScriptSeries" INTEGER NOT NULL DEFAULT 0')
+	if not "CursiveSeries" in columns:
+		steps.append('ALTER TABLE "BookletSettings" ADD COLUMN "CursiveSeries" INTEGER NOT NULL DEFAULT 1')
+	if "Cursive" in columns:
+		steps.append('UPDATE "BookletSettings" SET "ScriptSeries" = ("Cursive" = 0), "CursiveSeries" = ("Cursive" != 0)')
+		steps.append('ALTER TABLE "BookletSettings" DROP COLUMN "Cursive"')
+	for column: String in VERSION_COLUMNS_V7:
+		if not column in columns:
+			steps.append('ALTER TABLE "BookletSettings" ADD COLUMN "%s" INTEGER NOT NULL DEFAULT 1' % column)
+	steps.append("PRAGMA user_version = 7")
+	for step: String in steps:
+		if not db.query(step):
+			var message: String = "Could not bring this language pack to schema version 7: %s" % db.get_error_message()
+			db.query("ROLLBACK")
+			Log.error("PackSchema: %s (step: %s)" % [message, step.left(80)])
+			return message
+	if not db.query("COMMIT"):
+		var message: String = "Could not bring this language pack to schema version 7: %s" % db.get_error_message()
 		db.query("ROLLBACK")
 		Log.error("PackSchema: %s" % message)
 		return message
