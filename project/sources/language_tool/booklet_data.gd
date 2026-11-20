@@ -98,7 +98,7 @@ const LINE_BREAK: String = "⏎"
 ## Characters a booklet text is cut into words at, besides spaces: the Prof Tool's
 ## sentence parser's, plus the typography a story carries. An apostrophe cuts too,
 ## so "l'ours" is the words "l" and "ours", as the Sentence List stores it.
-const SEPARATORS: String = "'’!()[]{};:\"\\,<>./?@#$%^&*_~«»…–—|"
+const SEPARATORS: String = "'’!()[]{};:\"\\,<>./?@#$%^&*_~«»…–—|¡¿"
 
 ## A chapter of a booklet and everything listed in it.
 class Chapter:
