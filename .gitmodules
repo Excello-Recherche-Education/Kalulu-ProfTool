@@ -6,3 +6,7 @@
 	path = project/fonts
 	url = https://github.com/Excello-Recherche-Education/Kalulu-Fonts.git
 	branch = main
+[submodule "kalulu-booklets"]
+	path = kalulu-booklets
+	url = https://github.com/Excello-Recherche-Education/Kalulu-Booklets.git
+	branch = main

@@ -19,10 +19,11 @@ Kalulu-ProfTool/
 ├── project/              the Godot project — open project/project.godot
 │   └── fonts/            submodule: Kalulu-Fonts, every Kalulu font (res://fonts/)
 ├── kalulu-frontend/      submodule: the Kalulu game, pinned to one commit
+├── kalulu-booklets/      submodule: the reading booklets' generator, pinned to one commit
 ├── shared-files.txt      what the Prof Tool takes from the game
 └── tools/
     ├── setup.sh          one-shot setup for a fresh clone
-    ├── sync-shared.sh    copy the shared files from kalulu-frontend/
+    ├── sync-shared.sh    copy the shared files from kalulu-frontend/ and kalulu-booklets/
     └── apply-capitals.sh set a pack's share in capitals and draw them, headless
 ```
 
@@ -52,6 +53,18 @@ git add kalulu-frontend project && git commit
 `tools/sync-shared.sh --check` changes nothing and fails if `project/` has drifted
 from the pinned commit.
 
+**The reading booklets' generator comes the same way**, from
+[Kalulu-Booklets](https://github.com/Excello-Recherche-Education/Kalulu-Booklets):
+its `project/booklets/` folder is copied whole into `project/booklets/`
+(`res://booklets/` in both projects), and `tools/sync-shared.sh` removes here what
+was removed there. The Booklets screen hands it what it is editing,
+`BookletData.to_booklet_pack()`, so the Prof Tool prints exactly what
+Kalulu-Booklets' command line and release print. Change the generator in
+Kalulu-Booklets, then bump `kalulu-booklets` here and sync, as above.
+`kalulu-booklets/` carries the language packs as a submodule of its own (~1.3 GB):
+the Prof Tool never needs them, so clone without `--recurse-submodules` and let
+`tools/setup.sh` check out the submodules, one level only.
+
 The fonts are not among the shared files. `project/fonts/` is the
 [Kalulu-Fonts](https://github.com/Excello-Recherche-Education/Kalulu-Fonts)
 repository, which the game mounts too, at the same `res://fonts/`: the `.import`
@@ -64,7 +77,7 @@ with them.
 ## Getting started
 
 ```bash
-git clone --recurse-submodules git@github.com:Excello-Recherche-Education/Kalulu-ProfTool.git
+git clone git@github.com:Excello-Recherche-Education/Kalulu-ProfTool.git
 cd Kalulu-ProfTool && tools/setup.sh
 ```
 

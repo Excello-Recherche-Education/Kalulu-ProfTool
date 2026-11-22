@@ -9,6 +9,9 @@
 # kalulu-frontend submodule, and run tools/sync-shared.sh.
 #
 # Everything here must depend on nothing outside this list.
+#
+# The booklet generator, project/booklets/, is not listed: the script copies the
+# whole of kalulu-booklets/project/booklets/ there.
 
 # The pack-format code: reading and naming the files of a language pack.
 sources/utils/autoloads/database.gd
