@@ -59,7 +59,10 @@ its `project/booklets/` folder is copied whole into `project/booklets/`
 (`res://booklets/` in both projects), and `tools/sync-shared.sh` removes here what
 was removed there. The Booklets screen hands it what it is editing,
 `BookletData.to_booklet_pack()`, so the Prof Tool prints exactly what
-Kalulu-Booklets' command line and release print. Change the generator in
+Kalulu-Booklets' command line and release print: the Booklets screen shows the
+selected chapter's pages as they print, redrawn as it is edited, and *Build
+booklets…* writes the language's PDFs into a folder from what is on screen,
+saved or not. Change the generator in
 Kalulu-Booklets, then bump `kalulu-booklets` here and sync, as above.
 `kalulu-booklets/` carries the language packs as a submodule of its own (~1.3 GB):
 the Prof Tool never needs them, so clone without `--recurse-submodules` and let

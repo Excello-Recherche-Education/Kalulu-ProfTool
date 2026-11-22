@@ -188,6 +188,9 @@ var _sentence_ids: Dictionary[String, int] = {}
 var _pack_lists: BookletPack = null
 ## Why the last to_booklet_pack() returned null.
 var pack_error: String = ""
+## Counts the times refresh_lists() read the lists again: the preview keeps
+## the chapters' content while it stays the same.
+var lists_version: int = 0
 
 
 ## Reads everything from the open database.
@@ -323,6 +326,7 @@ func refresh_lists() -> void:
 	_load_pack_items()
 	# The generator's copy of the lists is read again when it is next asked for.
 	_pack_lists = null
+	lists_version += 1
 
 
 func _load_pack_items() -> void:
@@ -1376,11 +1380,7 @@ func to_booklet_pack() -> BookletPack:
 		var overrides: Dictionary = {}
 		for column: String in chapter.overrides:
 			overrides[column] = int(chapter.overrides[column])
-		var chapter_id: int = chapter.id
-		if chapter_id < 0:
-			var made: bool = is_forced(chapter) and chapter.lesson_nb in made_chapters_for
-			chapter_id = -chapter.lesson_nb if made else _UNSAVED_IDS - images.size() - index
-		var out: BookletPack.Chapter = BookletPack.Chapter.new(chapter_id, chapter.lesson_nb, chapter.position,
+		var out: BookletPack.Chapter = BookletPack.Chapter.new(_pack_id(chapter, index), chapter.lesson_nb, chapter.position,
 				chapter.booklet, chapter.title, chapter.image_gp_id if chapter.image_gp_id >= 0 else null,
 				chapter.grey_silent, overrides)
 		out.gp_ids.assign(chapter.gp_ids)
@@ -1400,5 +1400,40 @@ func to_booklet_pack() -> BookletPack:
 	pack.made_chapters_for.assign(made_chapters_for)
 	pack.index()
 	return pack
+
+
+## The ID the generator knows a chapter by in to_booklet_pack(): its own once
+## saved; for a lesson's made chapter, -LessonNb, as the command line gives it;
+## for any other new one, an ID that follows its place in the list.
+func pack_id_of(chapter: Chapter) -> int:
+	return _pack_id(chapter, chapters.find(chapter))
+
+
+func _pack_id(chapter: Chapter, index: int) -> int:
+	if chapter.id >= 0:
+		return chapter.id
+	if is_forced(chapter) and chapter.lesson_nb in made_chapters_for:
+		return -chapter.lesson_nb
+	return _UNSAVED_IDS - images.size() - index
+
+
+## The fonts folder the booklets print from: that of the Kalulu-Languages
+## checkout the language was opened from, `checkout_fonts`, when it holds every
+## font the language prints with (a release builds from such a checkout), else
+## the Prof Tool's own, res://fonts/ (Kalulu-Fonts). "" when neither has them
+## all; FontSet.find() then says what is missing.
+func fonts_folder(checkout_fonts: String) -> String:
+	var replaced: Dictionary = {}
+	for column: String in font_choices:
+		replaced[_FONT_ROLE_NAMES[column]] = font_choices[column].file
+	for folder: String in [checkout_fonts, "res://fonts"]:
+		if not folder.is_empty() and FontSet.find("", replaced, folder)["error"].is_empty():
+			return folder
+	return ""
+
+
+## FONT_ROLES' columns -> FontSet's roles.
+const _FONT_ROLE_NAMES: Dictionary[String, String] = {"ScriptFontID": "script", "ScriptBoldFontID": "script_bold",
+		"ScriptBlackFontID": "script_black", "CursiveFontID": "cursive"}
 
 #endregion
