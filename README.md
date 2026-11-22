@@ -17,6 +17,7 @@ its history came with it.
 ```
 Kalulu-ProfTool/
 ├── project/              the Godot project — open project/project.godot
+│   └── fonts/            submodule: Kalulu-Fonts, every Kalulu font (res://fonts/)
 ├── kalulu-frontend/      submodule: the Kalulu game, pinned to one commit
 ├── shared-files.txt      what the Prof Tool takes from the game
 └── tools/
@@ -50,6 +51,15 @@ git add kalulu-frontend project && git commit
 
 `tools/sync-shared.sh --check` changes nothing and fails if `project/` has drifted
 from the pinned commit.
+
+The fonts are not among the shared files. `project/fonts/` is the
+[Kalulu-Fonts](https://github.com/Excello-Recherche-Education/Kalulu-Fonts)
+repository, which the game mounts too, at the same `res://fonts/`: the `.import`
+files committed there are the same for both projects only because the path is
+the same, so keep it. A font is changed in Kalulu-Fonts, then this submodule's
+pointer moves here. The fonts are under the SIL Open Font License, not this
+repository's license; the export presets ship their `OFL.txt` and `LICENSE.md`
+with them.
 
 ## Getting started
 

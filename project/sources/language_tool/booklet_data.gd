@@ -682,7 +682,7 @@ func prints_version(column: String) -> bool:
 func add_font(path: String, display_name: String) -> Dictionary:
 	var file: String = font_file_in_fonts(path)
 	if file.is_empty():
-		return {font = null, error = "%s is not inside the fonts folder of a Kalulu-Languages checkout. Put the font there first (with its license in fonts/LICENSE.md), then pick it there." % path}
+		return {font = null, error = "%s is not inside the fonts folder of a Kalulu-Languages checkout. That folder is the Kalulu-Fonts repository: add the font there first (with its license in its LICENSE.md), then pick it in the checkout's fonts folder." % path}
 	if not path.get_extension().to_lower() in FONT_EXTENSIONS:
 		return {font = null, error = "%s is not a .ttf or .otf font." % path.get_file()}
 	for font: BookletFont in fonts:

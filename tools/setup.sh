@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 # One-shot setup for a fresh clone. Safe to re-run.
 #
-#   1. checks out the kalulu-frontend submodule;
+#   1. checks out the submodules: kalulu-frontend, and project/fonts (Kalulu-Fonts);
 #   2. installs the godot-sqlite binaries, which no repository carries (they are
 #      ~320 MB), by copying them from a Kalulu-Frontend checkout that has them;
 #   3. confirms project/ matches the pinned kalulu-frontend commit.
