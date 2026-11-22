@@ -4,7 +4,9 @@ extends RefCounted
 ## its Booklet* tables (Kalulu-Languages SCHEMA.md, "The reading booklets").
 ##
 ## The Booklets screen edits one of these and saves it back; nothing else in the
-## Prof Tool reads the tables. Kalulu-Booklets prints the booklets from them.
+## Prof Tool reads the tables. Kalulu-Booklets prints the booklets from them;
+## its generator is copied into res://booklets/ (tools/sync-shared.sh), and
+## to_booklet_pack() hands it what is on screen, saved or not.
 ##
 ## Chapters follow the app's lessons: they are kept sorted by their lesson's
 ## number, then by their position among the chapters of that lesson.
@@ -75,13 +77,13 @@ const FIRST_FONTS: PackedStringArray = ["", "Script", "Cursive"]
 
 ## The fonts a language can replace, in the order the screen shows them:
 ## BookletSettings column -> [label, the default font's name, its file in
-## Kalulu-Languages' fonts/]. The generator prints with these when the column is
-## NULL (Kalulu-Booklets fonts.py).
+## Kalulu-Fonts]. The generator prints with these when the column is NULL: the
+## files are its own (FontSet), so the two cannot disagree.
 const FONT_ROLES: Dictionary[String, Array] = {
-	"ScriptFontID": ["Script", "Mulish (Kalulu), regular", "mulish/kalulu_mulish_regular.otf"],
-	"ScriptBoldFontID": ["Script bold", "Mulish (Kalulu), bold", "mulish/kalulu_mulish_bold.otf"],
-	"ScriptBlackFontID": ["Script black", "Mulish (Kalulu), black", "mulish/kalulu_mulish_black.otf"],
-	"CursiveFontID": ["Cursive", "Marelle", "marelle/Marelle-Regular.ttf"],
+	"ScriptFontID": ["Script", "Mulish (Kalulu), regular", FontSet.SCRIPT],
+	"ScriptBoldFontID": ["Script bold", "Mulish (Kalulu), bold", FontSet.SCRIPT_BOLD],
+	"ScriptBlackFontID": ["Script black", "Mulish (Kalulu), black", FontSet.SCRIPT_BLACK],
+	"CursiveFontID": ["Cursive", "Marelle 2", FontSet.CURSIVE],
 }
 ## What a font file must end with to be printed: TrueType or OpenType.
 const FONT_EXTENSIONS: PackedStringArray = ["ttf", "otf"]
@@ -95,10 +97,6 @@ const IMAGE_EXTENSIONS: PackedStringArray = ["png", "jpg", "jpeg"]
 
 ## How the Booklets screen shows a line break that is part of a sentence.
 const LINE_BREAK: String = "⏎"
-## Characters a booklet text is cut into words at, besides spaces: the Prof Tool's
-## sentence parser's, plus the typography a story carries. An apostrophe cuts too,
-## so "l'ours" is the words "l" and "ours", as the Sentence List stores it.
-const SEPARATORS: String = "'’!()[]{};:\"\\,<>./?@#$%^&*_~«»…–—|¡¿"
 
 ## A chapter of a booklet and everything listed in it.
 class Chapter:
@@ -165,6 +163,8 @@ var lesson_ids: Dictionary[int, int] = {}
 ## GP ID -> {grapheme, phoneme, type, exception, lesson}; lesson is the first
 ## lesson teaching it, -1 for none.
 var gps: Dictionary[int, Dictionary] = {}
+## The same GPs as the generator models them: GP ID -> BookletPack.GP.
+var pack_gps: Dictionary = {}
 ## Lowercased text -> lesson the entry becomes readable at, -1 when never
 ## (no decomposition, or a GP no lesson teaches).
 var word_lessons: Dictionary[String, int] = {}
@@ -183,6 +183,11 @@ var pack_items: Array[Dictionary] = []
 var sentences: Dictionary[int, Dictionary] = {}
 ## Normalized sentence text -> sentence ID.
 var _sentence_ids: Dictionary[String, int] = {}
+## The pack's lists as the generator reads them, from the local copy's
+## language.db; null until to_booklet_pack() needs them again (refresh_lists()).
+var _pack_lists: BookletPack = null
+## Why the last to_booklet_pack() returned null.
+var pack_error: String = ""
 
 
 ## Reads everything from the open database.
@@ -316,6 +321,8 @@ func refresh_lists() -> void:
 	syllable_list = _pickable("Syllables", "Syllable", syllable_lessons)
 	_load_sentences()
 	_load_pack_items()
+	# The generator's copy of the lists is read again when it is next asked for.
+	_pack_lists = null
 
 
 func _load_pack_items() -> void:
@@ -468,6 +475,7 @@ func _word_text(word_id: int) -> String:
 
 func _load_gps() -> void:
 	gps.clear()
+	pack_gps.clear()
 	Database.db.query("SELECT GPs.*, (SELECT MIN(Lessons.LessonNb) FROM GPsInLessons
 		INNER JOIN Lessons ON Lessons.ID = GPsInLessons.LessonID
 		WHERE GPsInLessons.GPID = GPs.ID) AS FirstLesson FROM GPs ORDER BY GPs.ID")
@@ -479,6 +487,8 @@ func _load_gps() -> void:
 			exception = int(row.Exception) != 0,
 			lesson = -1 if row.FirstLesson == null else int(row.FirstLesson),
 		}
+		pack_gps[int(row.ID)] = BookletPack.GP.new(int(row.ID), str(row.Grapheme), str(row.Phoneme),
+				int(row.Type) if row.Type != null else 0, int(row.Exception) != 0, row.FirstLesson)
 
 
 # Text -> lesson an entry of the table is readable at: the last lesson among the
@@ -534,33 +544,23 @@ func find_sentence(text: String) -> int:
 	return _sentence_ids.get(normalize(text), -1)
 
 
-## The words of a booklet text, lowercased, in order. A hyphenated form is cut
-## by hyphenated_words(), `words` (lowercased spelling -> anything) being the
-## words it may stay whole as: the Word List's, usually.
+## The words of a booklet text, lowercased, in order, cut as the generator cuts
+## them (BookletText): at spaces and at BookletText.SEPARATORS, an apostrophe
+## included, so "l'ours" is "l" and "ours", as the Sentence List stores it. A
+## hyphenated form stays whole when `words` (lowercased spelling -> anything:
+## the Word List's, usually) has it, else it is the words between its hyphens.
 static func words_of(text: String, words: Dictionary = {}) -> PackedStringArray:
-	var cleaned: String = text.to_lower().replace("\n", " ").replace("\t", " ")
-	for separator: String in SEPARATORS:
-		cleaned = cleaned.replace(separator, " ")
-	var result: PackedStringArray = []
-	for token: String in cleaned.split(" ", false):
-		result.append_array(hyphenated_words(token, func(word: String) -> bool: return words.has(word)))
-	return result
+	return PackedStringArray(BookletText.words_of(text, words))
 
 
 ## The words a hyphenated form is: itself when `is_word` says it is one
 ## ("tam-tam", "arc-en-ciel"), otherwise the words between its hyphens ("as-tu"
-## is "as" and "tu"). The euphonic t of "a-t-il" is no word and is left out.
-## The Sentence List's parser and the generator cut the same way.
+## is "as" and "tu"), the euphonic t of "a-t-il" left out. The Sentence List's
+## parser uses it, so it cuts as the generator does (BookletText).
 static func hyphenated_words(token: String, is_word: Callable) -> PackedStringArray:
 	if not "-" in token or is_word.call(token):
 		return PackedStringArray([token])
-	var parts: PackedStringArray = token.split("-", false)
-	var result: PackedStringArray = []
-	for index: int in range(parts.size()):
-		if parts[index] == "t" and index > 0 and index < parts.size() - 1:
-			continue
-		result.append(parts[index])
-	return result
+	return PackedStringArray(BookletText.words_of(token))
 
 
 func sort_chapters() -> void:
@@ -605,31 +605,14 @@ func lesson_gp_ids(lesson_id: int) -> Array[int]:
 	return ids
 
 
-## A title from GPs: each grapheme once, exceptions and silent letters left out
-## unless nothing else is left; a single letter is written with its capital, as
-## the booklets do ("L l"); one grapheme per line, so that a title of several
-## prints as a column ("U u" above "N n"), as the hand-written titles do. Only a
-## starting point: the booklets often title a chapter by contexts ("ci ce cy")
-## rather than graphemes. Kalulu-Booklets' pack.title_for() is its twin: change
-## both.
+## A title from GPs, as the generator makes one for a lesson's forced chapter
+## (BookletPack.title_for()): each grapheme once, exceptions and silent letters
+## left out unless nothing else is left, a single letter with its capital ("L l"),
+## one grapheme per line, so that a title of several prints as a column ("U u"
+## above "N n"), as the hand-written titles do. Only a starting point: the
+## booklets often title a chapter by contexts ("ci ce cy") rather than graphemes.
 func title_for(gp_ids: Array[int]) -> String:
-	var kept: Array[int] = []
-	for gp_id: int in gp_ids:
-		if gps.has(gp_id) and not gps[gp_id].exception and int(gps[gp_id].type) != 0:
-			kept.append(gp_id)
-	if kept.is_empty():
-		kept = gp_ids
-	var parts: PackedStringArray = []
-	for gp_id: int in kept:
-		if not gps.has(gp_id):
-			continue
-		var grapheme: String = gps[gp_id].grapheme
-		var text: String = grapheme
-		if grapheme.length() == 1 and grapheme.to_upper() != grapheme:
-			text = grapheme.to_upper() + " " + grapheme
-		if not text in parts:
-			parts.append(text)
-	return "\n".join(parts)
+	return BookletPack.title_for(gp_ids, pack_gps)
 
 
 func first_gp_with_image(gp_ids: Array[int]) -> int:
@@ -1339,5 +1322,83 @@ static func capitals_counts(db: SQLite) -> Dictionary[String, Array]:
 		var row: Dictionary = db.query_result[0] if not db.query_result.is_empty() else {Rows = 0, Flagged = 0}
 		counts[table] = [int(row.Flagged), int(row.Rows)]
 	return counts
+
+#endregion
+
+
+#region The generator's input
+
+## Chapters not saved yet have no ID. The generator keys its choices and its
+## random grids by chapter ID, so each gets one of its own: a lesson's forced
+## chapter made on loading the one the command line gives it (-LessonNb, so a
+## pack saved without it previews as it will print), any other this far below.
+const _UNSAVED_IDS: int = -1000000
+
+
+## The pack as Kalulu-Booklets' generator reads it (BookletPack), with what this
+## screen holds in place of the saved Booklet* tables: the settings, fonts,
+## pictures and chapters being edited, saved or not. The GPs, words, syllables
+## and sentences are the local copy's, which the other tabs write at once. null,
+## with pack_error set, when the local copy cannot be read.
+##
+## A chapter saved later gets its real ID, and with it other random grids: the
+## preview of an unsaved chapter shows the arrangement it has before saving.
+func to_booklet_pack() -> BookletPack:
+	pack_error = ""
+	if _pack_lists == null:
+		var reader: BookletPackReader = BookletPackReader.new()
+		_pack_lists = reader.read(ProjectSettings.globalize_path(Database.db_path))
+		if _pack_lists == null:
+			pack_error = reader.error
+			return null
+	var pack: BookletPack = _pack_lists
+	if not Database.language.is_empty():
+		pack.locale = Database.language
+	pack.settings.clear()
+	for column: String in Array(LANGUAGE_COLUMNS) + SETTINGS.keys():
+		var series_default: float = SERIES[column][1] if SERIES.has(column) else 1.0
+		pack.settings[column] = int(settings.get(column, series_default if column in LANGUAGE_COLUMNS else 0.0))
+	pack.settings[CAPITALS_COLUMN] = settings.get(CAPITALS_COLUMN, 0.0)
+	pack.fonts.clear()
+	for role: String in BookletPack.FONT_COLUMNS:
+		var font: BookletFont = font_choices.get(BookletPack.FONT_COLUMNS[role])
+		if font != null:
+			pack.fonts[role] = BookletPack.BookletFont.new(font.name, font.file)
+	pack.images.clear()
+	var image_ids: Dictionary = {}
+	for index: int in range(images.size()):
+		var image: BookletImage = images[index]
+		image_ids[image] = image.id if image.id >= 0 else _UNSAVED_IDS - index
+		pack.images[image_ids[image]] = BookletPack.BookletImage.new(image.name, image.file)
+	var chapters_out: Array[BookletPack.Chapter] = []
+	for index: int in range(chapters.size()):
+		var chapter: Chapter = chapters[index]
+		var overrides: Dictionary = {}
+		for column: String in chapter.overrides:
+			overrides[column] = int(chapter.overrides[column])
+		var chapter_id: int = chapter.id
+		if chapter_id < 0:
+			var made: bool = is_forced(chapter) and chapter.lesson_nb in made_chapters_for
+			chapter_id = -chapter.lesson_nb if made else _UNSAVED_IDS - images.size() - index
+		var out: BookletPack.Chapter = BookletPack.Chapter.new(chapter_id, chapter.lesson_nb, chapter.position,
+				chapter.booklet, chapter.title, chapter.image_gp_id if chapter.image_gp_id >= 0 else null,
+				chapter.grey_silent, overrides)
+		out.gp_ids.assign(chapter.gp_ids)
+		out.image_id = image_ids.get(chapter.image) if chapter.image != null else null
+		for sentence: Dictionary in chapter.sentences:
+			out.sentences.append(BookletPack.ChapterSentence.new(int(sentence.id), int(sentence.brk)))
+		for part: int in chapter.entries:
+			var entries: Array = []
+			for entry: Dictionary in chapter.entries[part]:
+				entries.append(BookletPack.Entry.new(str(entry.text), str(entry.text2), bool(entry.header)))
+			if not entries.is_empty():
+				out.entries[part] = entries
+		for story: Dictionary in chapter.stories:
+			out.stories.append(BookletPack.Story.new(str(story.title), str(story.text)))
+		chapters_out.append(out)
+	pack.chapters.assign(chapters_out)
+	pack.made_chapters_for.assign(made_chapters_for)
+	pack.index()
+	return pack
 
 #endregion

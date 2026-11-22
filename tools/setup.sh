@@ -1,7 +1,10 @@
 #!/usr/bin/env sh
 # One-shot setup for a fresh clone. Safe to re-run.
 #
-#   1. checks out the submodules: kalulu-frontend, and project/fonts (Kalulu-Fonts);
+#   1. checks out the submodules, one level only: kalulu-frontend, kalulu-booklets
+#      (the booklet generator) and project/fonts (Kalulu-Fonts). kalulu-booklets
+#      has the language packs as a submodule of its own (~1.3 GB), which the Prof
+#      Tool never uses: it is told never to check them out;
 #   2. installs the godot-sqlite binaries, which no repository carries (they are
 #      ~320 MB), by copying them from a Kalulu-Frontend checkout that has them;
 #   3. confirms project/ matches the pinned kalulu-frontend commit.
@@ -29,9 +32,13 @@ missing_libs() {
 	done
 }
 
-echo "== Submodule"
+echo "== Submodules"
 git -C "$root" submodule update --init
+# Local to this clone: a later "git submodule update --recursive" leaves the
+# generator's own copy of the packs alone.
+git -C "$root/kalulu-booklets" config submodule.kalulu-languages.update none
 echo "kalulu-frontend at $(git -C "$root/kalulu-frontend" rev-parse --short HEAD)"
+echo "kalulu-booklets at $(git -C "$root/kalulu-booklets" rev-parse --short HEAD)"
 
 echo "== godot-sqlite binaries"
 if [ -z "$(missing_libs "$bin")" ]; then
