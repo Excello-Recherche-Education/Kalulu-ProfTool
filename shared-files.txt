@@ -33,7 +33,6 @@ addons/godot-sqlite/plugin.cfg
 resources/themes/kalulu_theme.tres
 danger_button_stylebox.tres
 resources/audio_buses/main_audio_bus_layout.tres
-assets/fonts/kalulu_mulish_regular.otf
 assets/menus/checkbox_transparent_background_checked.png
 assets/menus/checkbox_transparent_background_unchecked.png
 assets/menus/checkbox_white_background_checked.png
