@@ -46,6 +46,12 @@ var _font_options: Array[OptionButton] = []
 ## Font file path -> the font loaded from it for a preview, null when it cannot be.
 var _loaded_fonts: Dictionary[String, FontFile] = {}
 var _image_dialog: FileDialog
+var _preview: BookletPreview
+## The preview is redrawn with the "To check" list, after an edit settles. An
+## edit inside a chapter works that chapter out again; anything else (the
+## language settings, the chapters' order) works every chapter out again.
+var _preview_forgets: bool = false
+var _build_dialog: FileDialog
 ## Picture file path -> its thumbnail, null when it cannot be read.
 var _thumbnails: Dictionary[String, Texture2D] = {}
 
@@ -53,6 +59,7 @@ var _thumbnails: Dictionary[String, Texture2D] = {}
 func _ready() -> void:
 	_build_layout()
 	data.load_from_database()
+	_preview.checkout_fonts = _fonts_folder()
 	_fill_chapter_list()
 	_show_settings()
 	if not data.made_chapters_for.is_empty():
@@ -96,6 +103,7 @@ func _build_layout() -> void:
 	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_status.add_theme_font_size_override("font_size", TEXT_SIZE)
 	top.add_child(_status)
+	top.add_child(_button("Build booklets…", _on_build_pressed))
 	top.add_child(_button("Save", _on_save_pressed))
 
 	var split: HSplitContainer = HSplitContainer.new()
@@ -103,7 +111,7 @@ func _build_layout() -> void:
 	root.add_child(split)
 
 	var left: VBoxContainer = VBoxContainer.new()
-	left.custom_minimum_size.x = 760
+	left.custom_minimum_size.x = 640
 	left.add_theme_constant_override("separation", 15)
 	split.add_child(left)
 	left.add_child(_button("Language settings", _show_settings))
@@ -131,9 +139,19 @@ func _build_layout() -> void:
 	move_row.add_child(_delete_button)
 	_update_chapter_buttons()
 
+	# The editor and, beside it, the preview of the selected chapter's pages.
+	var work: HSplitContainer = HSplitContainer.new()
+	work.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	split.add_child(work)
 	var right: VBoxContainer = VBoxContainer.new()
 	right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	split.add_child(right)
+	right.size_flags_stretch_ratio = 1.4
+	work.add_child(right)
+	_preview = BookletPreview.new()
+	_preview.data = data
+	_preview.custom_minimum_size.x = 560
+	_preview.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	work.add_child(_preview)
 	var scroll: ScrollContainer = ScrollContainer.new()
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
@@ -147,6 +165,7 @@ func _build_layout() -> void:
 	_problems_timer.one_shot = true
 	_problems_timer.wait_time = 0.6
 	_problems_timer.timeout.connect(_show_problems)
+	_problems_timer.timeout.connect(_update_preview)
 	add_child(_problems_timer)
 
 
@@ -292,6 +311,7 @@ func _on_add_chapter_pressed() -> void:
 		return
 	var lesson_nb: int = _lesson_picker.get_item_id(_lesson_picker.selected)
 	var chapter: BookletData.Chapter = data.add_chapter(data.lesson_ids[lesson_nb])
+	_preview_forgets = true
 	_changed()
 	_chapter = chapter
 	_fill_chapter_list()
@@ -312,6 +332,7 @@ func _on_move_pressed(direction: int) -> void:
 			other.position = _chapter.position
 			_chapter.position = target
 			data.sort_chapters()
+			_preview_forgets = true
 			_changed()
 			_fill_chapter_list()
 			_show_chapter(_chapter)
@@ -326,6 +347,8 @@ func _on_delete_chapter_pressed() -> void:
 	data.chapters.erase(_chapter)
 	data.sort_chapters()
 	_chapter = null
+	_preview_forgets = true
+	_preview.show_chapter(null)
 	_changed()
 	_fill_chapter_list()
 	_show_settings()
@@ -490,6 +513,7 @@ func _apply_capitals(share: float) -> void:
 
 func _show_chapter(chapter: BookletData.Chapter) -> void:
 	_chapter = chapter
+	_preview.show_chapter(chapter)
 	_update_chapter_buttons()
 	_clear_editor()
 	if BookletData.is_forced(chapter):
@@ -535,8 +559,10 @@ func _show_chapter(chapter: BookletData.Chapter) -> void:
 
 	_heading("Own settings")
 	_editor.add_child(_label("Ticked: this chapter's own value. Unticked: the language's."))
+	# Two columns, the language's value under each name: a third column made
+	# the form too wide to leave the preview any room beside it.
 	var grid: GridContainer = GridContainer.new()
-	grid.columns = 3
+	grid.columns = 2
 	grid.add_theme_constant_override("h_separation", 30)
 	_editor.add_child(grid)
 	for column: String in BookletData.SETTINGS:
@@ -681,13 +707,19 @@ func _add_override_row(grid: GridContainer, chapter: BookletData.Chapter, column
 	own.text = BookletData.SETTINGS[column][0]
 	own.add_theme_font_size_override("font_size", TEXT_SIZE)
 	own.button_pressed = chapter.overrides.has(column)
-	grid.add_child(own)
+	var name_cell: VBoxContainer = VBoxContainer.new()
+	name_cell.add_theme_constant_override("separation", 0)
+	name_cell.add_child(own)
+	var language: Label = _label("language: " + _setting_text(column, data.settings.get(column, 0.0)), 28, false)
+	language.modulate = Color(1.0, 1.0, 1.0, 0.7)
+	name_cell.add_child(language)
+	grid.add_child(name_cell)
 	var control: Control = _setting_control(column, data.value_of(chapter, column), func(value: float) -> void:
 		chapter.overrides[column] = value
 		own.set_pressed_no_signal(true)
 		_changed())
+	control.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	grid.add_child(control)
-	grid.add_child(_label("language: " + _setting_text(column, data.settings.get(column, 0.0)), TEXT_SIZE, false))
 	# Ticked again, the chapter's value is what the control shows, not the
 	# language's, which value_of() returns once the override is gone.
 	own.toggled.connect(func(pressed: bool) -> void:
@@ -1479,6 +1511,15 @@ func _changed() -> void:
 	_problems_timer.start()
 
 
+## After an edit settles: the preview, drawn again.
+func _update_preview() -> void:
+	if _chapter != null and not _preview_forgets:
+		_preview.chapter_changed()
+	else:
+		_preview.forget()
+	_preview_forgets = false
+
+
 func _on_save_pressed() -> void:
 	var error: String = data.save_to_database()
 	if not error.is_empty():
@@ -1486,6 +1527,58 @@ func _on_save_pressed() -> void:
 		return
 	_dirty = false
 	_status.text = "Saved."
+	# New chapters have their IDs now, and with them their random grids.
+	_preview.forget()
+
+
+#region Build booklets
+
+## Writes the language's booklets as PDF files into a folder picked, from what
+## is on screen, saved or not: what Kalulu-Booklets' command line would write
+## once it is saved, so a change can be checked before saving it.
+func _on_build_pressed() -> void:
+	if _build_dialog == null:
+		_build_dialog = FileDialog.new()
+		_build_dialog.title = "Build the booklets into a folder"
+		_build_dialog.file_mode = FileDialog.FILE_MODE_OPEN_DIR
+		_build_dialog.access = FileDialog.ACCESS_FILESYSTEM
+		_build_dialog.size = Vector2i(1500, 1000)
+		_build_dialog.dir_selected.connect(_build_into)
+		add_child(_build_dialog)
+	_build_dialog.popup_centered()
+
+
+func _build_into(folder: String) -> void:
+	_status.text = "Building the booklets… (a minute at most)"
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var pack: BookletPack = data.to_booklet_pack()
+	if pack == null:
+		_status.text = "The booklets could not be built: %s" % data.pack_error
+		return
+	var fonts_folder: String = data.fonts_folder(_fonts_folder())
+	var said: PackedStringArray = []
+	var errors: PackedStringArray = []
+	var code: int = BookletBuild.new(func(line: String) -> void: said.append(line),
+			func(line: String) -> void: errors.append(line)).build_pack(pack, [], [], folder, "",
+			fonts_folder if not fonts_folder.is_empty() else "res://fonts")
+	var built: bool = code == 0
+	_status.text = ("Booklets written to %s." % folder) if built else "The booklets could not be built: see the report."
+	var report: AcceptDialog = AcceptDialog.new()
+	report.title = "Booklets built" if built else "Booklets not built"
+	report.size = Vector2i(1800, 1100)
+	var text: TextEdit = TextEdit.new()
+	text.editable = false
+	text.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
+	text.add_theme_font_size_override("font_size", TEXT_SIZE)
+	text.text = "\n".join(errors + said)
+	report.add_child(text)
+	report.confirmed.connect(report.queue_free)
+	report.canceled.connect(report.queue_free)
+	add_child(report)
+	report.popup_centered()
+
+#endregion
 
 
 func _on_back_pressed() -> void:
